@@ -1,0 +1,49 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-officetask}
+      POSTGRES_USER: ${POSTGRES_USER:-officetask}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a unique POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-officetask} -d ${POSTGRES_DB:-officetask}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # Intentionally no host port: employee computers must never connect directly to PostgreSQL.
+
+  web:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      APP_NAME: ${APP_NAME:-Office Task & Performance Management System}
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
+      SESSION_MAX_AGE_SECONDS: ${SESSION_MAX_AGE_SECONDS:-28800}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-officetask}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-officetask}
+      UPLOAD_DIR: /srv/officetask/storage/uploads
+      MAX_UPLOAD_SIZE_MB: ${MAX_UPLOAD_SIZE_MB:-20}
+      BACKUP_DIR: /srv/officetask/storage/backups
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
+    ports:
+      - "${APP_BIND_IP:-0.0.0.0}:${APP_PORT:-8000}:8000"
+    volumes:
+      - uploads:/srv/officetask/storage/uploads
+      - backups:/srv/officetask/storage/backups
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health/live', timeout=3)"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  postgres_data:
+  uploads:
+  backups:

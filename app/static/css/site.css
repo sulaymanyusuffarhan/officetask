@@ -1,0 +1,17 @@
+* { box-sizing: border-box; }
+:root { color-scheme: light; font-family: Inter, "Segoe UI", Arial, sans-serif; color: #1f2937; background: #f3f6fa; }
+body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 2rem 1rem; }
+.shell { width: min(920px, 100%); background: #fff; border: 1px solid #e4e9f0; border-radius: 18px; padding: clamp(1.5rem, 5vw, 3.5rem); box-shadow: 0 18px 55px rgb(18 45 81 / 9%); }
+.brand-row { display: flex; align-items: center; gap: 1.5rem; }
+.emblem { width: 104px; height: 104px; object-fit: contain; }
+.eyebrow { color: #9b7911; font-size: .75rem; font-weight: 750; letter-spacing: .14em; margin: 0 0 .45rem; }
+h1 { color: #173d73; font-size: clamp(1.5rem, 3.5vw, 2.3rem); line-height: 1.15; margin: 0; }
+.brand-copy > p:last-child { margin: .65rem 0 0; color: #64748b; }
+.status-card { margin-top: 2.5rem; display: flex; gap: 1rem; align-items: flex-start; padding: 1.25rem 1.4rem; background: #f2f7ff; border: 1px solid #dce8fa; border-radius: 12px; }
+.status-dot { flex: 0 0 11px; height: 11px; margin-top: .4rem; border-radius: 50%; background: #d09c1d; box-shadow: 0 0 0 4px #f8edce; }
+h2 { margin: 0; color: #173d73; font-size: 1.05rem; }
+.status-card p { margin: .4rem 0 0; line-height: 1.6; color: #4b5b70; }
+.notice { margin: 1.2rem 0 2rem; color: #815a00; font-size: .9rem; line-height: 1.6; }
+footer { border-top: 1px solid #e9edf2; padding-top: 1.2rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; color: #64748b; font-size: .82rem; }
+.tbc-logo { width: 112px; height: 76px; object-fit: contain; }
+@media (max-width: 560px) { .brand-row { align-items: flex-start; gap: 1rem; } .emblem { width: 70px; height: 70px; } footer { align-items: flex-start; flex-direction: column; } .tbc-logo { align-self: flex-end; } }
