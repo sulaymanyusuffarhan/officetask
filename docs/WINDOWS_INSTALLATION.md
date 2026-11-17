@@ -51,8 +51,9 @@ From an authorized office computer, browse to `http://<reserved-server-ip>:8000`
 5. Sign in as the Head of Office, review/return/approve and publish. Once published, use a reasoned new version for corrections.
 6. In **Equipment & custody**, the Head first saves the authorized-borrower roles (until configured, authorization is denied), then the Head/System Administrator assigns dated custodians for Morning/Afternoon/Evening shifts. Register each device and accessory as a separate asset with a unique asset number; link accessories and add photo, current location, condition, optional serial, purchase and warranty details. Test request → authorization → actual custodian issue → borrower acknowledgement → cross-shift handover → partial return/missing → inspection with test records.
 7. Editors create one task record per accountable employee. Employees acknowledge, progress, submit written reports and allowed attachments. Editors verify, request corrections or reject with a reason. Head dashboard and reports distinguish submitted from verified work.
+8. In **TBC Digital social media**, the Head registers the verified public account profile for YouTube, Facebook, Instagram, X and TikTok and designates the reporting officer. Do not enter social passwords or API credentials. The officer copies weekly figures from official platform analytics, marks unavailable values N/A, attaches screenshot/report evidence and submits; the Head reviews. Quarterly reports consolidate approved weekly submissions. No official handles or statistics are prefilled. See [Social media reporting](SOCIAL_MEDIA_REPORTING.md).
 
-See [Equipment & shift custody](EQUIPMENT_MANAGEMENT.md) for detailed role permissions, workflow, reports and scenario test. Migration `bf8103392858` is applied by the normal installer / `python -m app.cli init-db` update path.
+See [Equipment & shift custody](EQUIPMENT_MANAGEMENT.md) for detailed role permissions, workflow, reports and scenario test. Migration `a1b2c3d4e5f6` adds the manual-first social reporting tables; the normal installer / `python -m app.cli init-db` update path applies it.
 
 ## 6. Start, stop and scheduled tasks
 

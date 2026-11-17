@@ -15,6 +15,7 @@ The FastAPI service is the only employee-facing entry point. PostgreSQL runs on 
 - PostgreSQL has no host port mapping; local CSS/JS; Compose container runs as a non-root user; secrets live in untracked `.env`.
 - Database/upload paired-backup tooling, manifest checksums, restore confirmation, and access-restricted LAN firewall helper.
 - Equipment APIs enforce authorizer-role policy, active assigned/replacement custodian checks for physical issue/return, private authenticated photo access, unique individual assets, no direct completed-transaction deletion, per-item condition/status checks, audit events, and row locks on assets during PostgreSQL issue operations.
+- Social reporting is manual-first: platform-profile identifiers only (no social passwords/API secrets), backend Head/designated-officer checks, private authenticated evidence downloads, file size/signature allowlists, validation before CSV/XLSX import, unique platform/week constraints, source labels, audit events, evidence-required weekly submission, approver separation, and immutable submitted/approved history. No scraping or API calls are implemented.
 
 ## Known gaps — not security-certified
 

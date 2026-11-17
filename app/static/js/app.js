@@ -1,7 +1,7 @@
 (() => {
   const $ = (s, root = document) => root.querySelector(s);
   const $$ = (s, root = document) => [...root.querySelectorAll(s)];
-  const state = { user: null, csrf: "", people: [], shifts: [], departments: [], activeView: "dashboard" };
+  const state = { user: null, csrf: "", people: [], shifts: [], departments: [], socialAllowed: false, socialOfficerUsers: [], socialAccounts: [], socialPreviewFile: null, activeView: "dashboard" };
   const loginPanel = $("#login-panel"), workspace = $("#workspace"), flash = $("#flash");
   const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const today = () => new Date().toISOString().slice(0, 10);
@@ -34,6 +34,10 @@
     try { [state.people, state.shifts, state.departments] = await Promise.all([
       api("/api/people").catch(() => []), api("/api/shifts").catch(() => []), api("/api/departments").catch(() => [])
     ]); } catch (_) {}
+    const socialAccess = await api("/api/social/access").catch(() => ({allowed:false}));
+    state.socialAllowed = Boolean(socialAccess.allowed);
+    $(".social-only").hidden = !state.socialAllowed;
+    if (!state.socialAllowed && state.activeView === "social") state.activeView = "dashboard";
     await showView(state.activeView || "dashboard");
   }
   function stats(items) {
@@ -150,6 +154,129 @@
       target.innerHTML=`<div class="row-actions export-links"><a class="button small" href="/api/reports/tasks.pdf?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}">Download PDF</a><a class="button small" href="/api/reports/tasks.xlsx?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}">Download Excel</a><a class="button small" href="/api/reports/tasks.csv?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}">Download CSV</a></div>${performanceTable(data.employees)}<div class="grid report-breakdowns">${panels.map(([title,rows])=>`<div class="panel"><h3>${title}</h3>${chartRows(rows)}</div>`).join("")}</div>`;
     } catch(e) { target.innerHTML=`<div class="message error">${esc(e.message)}</div>`; }
   }
+  const SOCIAL_PLATFORMS = [["youtube","YouTube"],["facebook","Facebook"],["instagram","Instagram"],["x","X"],["tiktok","TikTok"]];
+  const SOCIAL_METRICS = [["audience_start","Audience/followers at start"],["audience_end","Audience/followers at end"],
+    ["new_followers","New followers/subscribers"],["lost_followers","Lost followers"],["reach","Reach"],["impressions","Impressions"],
+    ["views","Views"],["likes","Likes"],["comments","Comments"],["shares","Shares"],["saves","Saves"],
+    ["posts_published","Posts published"],["videos_published","Videos published"]];
+  const socialMonday = (value=today()) => {const d=new Date(`${value}T12:00:00`);d.setDate(d.getDate()-((d.getDay()+6)%7));return d.toISOString().slice(0,10);};
+  const socialValue = value => value===null||value===undefined?"N/A":String(value);
+  const socialPercent = value => value===null||value===undefined?"N/A":`${value}%`;
+  function socialMetricFields(values={}) {
+    return `<div class="social-metric-grid">${SOCIAL_METRICS.map(([key,label])=>`<label>${label}<input name="${key}" type="text" inputmode="numeric" pattern="(N/A|[0-9]+)" value="${esc(socialValue(values[key]))}" placeholder="N/A or whole number" aria-label="${label}; enter N/A when unavailable" required></label>`).join("")}</div>`;
+  }
+  function socialWeeklyForm(platform, report=null) {
+    const id=report?`social-edit-${report.id}`:`social-create-${platform}`;
+    const week=report?.reporting_week||socialMonday();
+    return `<form id="${id}" class="social-report-form" data-platform="${platform}" data-report="${report?.id||""}">
+      <div class="form-grid"><label>Reporting date<input name="reporting_date" type="date" value="${report?.reporting_date||today()}" required></label>
+      <label>Reporting week (Monday start)<input name="reporting_week" type="date" value="${week}" required></label>
+      <label class="wide">Statistics <span class="hint">Enter a whole number including 0, or leave the explicit N/A marker. A blank or unavailable statistic is never silently treated as zero.</span></label>
+      <div class="wide">${socialMetricFields(report?.metrics||{})}</div>
+      <label class="wide">Best-performing content<textarea name="best_content" maxlength="5000">${esc(report?.best_content||"")}</textarea></label>
+      <label class="wide">Comments and recommendations<textarea name="recommendations" maxlength="10000">${esc(report?.recommendations||"")}</textarea></label>
+      <label class="wide">Supporting screenshots / PDF / Excel / CSV ${report?"(add more evidence)":"(recommended; required before submission)"}<input name="evidence" type="file" multiple accept="image/png,image/jpeg,application/pdf,.xlsx,.csv"></label>
+      <div class="wide"><button class="button primary">${report?"Save corrected draft":"Save weekly draft"}</button></div></div>
+      <p class="hint">Source is recorded as Manually entered. No social login credentials or external API are used.</p></form>`;
+  }
+  function socialAccountsMarkup() {
+    return `<div class="panel"><h2>Official platform accounts</h2><p class="hint">Register the real verified profile name and handle for each network. The repository does not assume or invent account identifiers. This module never asks for a platform password or API token.</p><div class="grid social-platform-grid">${state.socialAccounts.map(a=>`<details class="social-account-card"><summary>${esc(a.platform_name)} · ${a.configured?esc(a.account_handle):"Account details required"}</summary>
+      <form id="social-account-${a.platform}" class="form-grid"><label>Official profile/display name<input name="account_name" value="${esc(a.account_name||"")}" required maxlength="160"></label>
+      <label>Verified handle / channel identifier<input name="account_handle" value="${esc(a.account_handle||"")}" required maxlength="160"></label>
+      <label class="wide">Public profile URL (optional)<input name="profile_url" type="url" value="${esc(a.profile_url||"")}" placeholder="https://..."></label>
+      <div class="wide"><button class="button">${a.configured?"Update verified profile":"Register official profile"}</button></div></form></details>`).join("")}</div></div>`;
+  }
+  async function loadSocial() {
+    const root=$("#view-social");
+    if(!state.socialAllowed){root.innerHTML=`<div class="message error">Designated social media officer or Head of Office permission required.</div>`;return;}
+    root.innerHTML=`<div class="page-heading"><div><h1>TBC Digital social media performance</h1><p>Manual-first reporting for YouTube, Facebook, Instagram, X and TikTok. Works without API credentials, integrations, scraping, or storing social passwords.</p></div></div><div class="empty">Loading social media records…</div>`;
+    try {
+      const [accounts,reports,quarters]=await Promise.all([api("/api/social/accounts"),api("/api/social/weekly"),api("/api/social/quarters")]);
+      state.socialAccounts=accounts; state.socialReports=reports; state.socialQuarters=quarters;
+      let setup="";
+      if(isRole("head_of_office")){
+        const config=await api("/api/social/officers");
+        setup=`${socialAccountsMarkup()}<div class="panel"><h2>Designate social media reporting officers</h2><form id="social-officers"><div class="form-grid">${config.users.map(u=>`<label class="social-check"><input type="checkbox" name="user_ids" value="${u.id}" ${config.user_ids.includes(u.id)?"checked":""}>${esc(u.name)} · ${esc(u.role)}</label>`).join("")||"<p>No active eligible user accounts.</p>"}<div class="wide"><button class="button">Save designated officers</button></div></div></form><p class="hint">Only designated officers enter and submit weekly/quarterly reports. The Head reviews and approves; self-approval is blocked.</p></div>`;
+      }
+      const accountCards=SOCIAL_PLATFORMS.map(([platform,label])=>{
+        const account=accounts.find(a=>a.platform===platform);
+        return `<details class="panel social-entry"><summary><strong>${label}</strong> · ${account?.configured?esc(account.account_handle):"Register verified account profile first"}</summary>
+          ${account?.configured?socialWeeklyForm(platform):`<p class="hint">The Head of Office must enter and verify the official profile details above before statistics can be recorded.</p>`}</details>`;
+      }).join("");
+      const reportList=socialReportTable(reports);
+      const importPanel=`<div class="panel"><h2>Import from Excel or CSV</h2><p>Download a blank template, fill one row per platform-week, mark unavailable fields N/A, preview validation, correct errors in the file and preview again. Successful imports are saved as Draft, marked Imported from file, and the original file is attached as evidence.</p>
+        <div class="row-actions"><a class="button small" href="/api/social/template.xlsx">Download Excel template</a><a class="button small" href="/api/social/template.csv">Download CSV template</a></div>
+        <form id="social-import" class="inline-form"><label>Analytics data file<input type="file" name="file" accept=".xlsx,.csv" required></label><button class="button">Validate and preview</button></form><div id="social-import-preview"></div></div>`;
+      const reportsPanel=`<div class="panel"><div class="panel-head"><div><h2>Weekly reports</h2><p class="hint">${reports.length} saved report record(s), including drafts, returned reports and approvals.</p></div><div class="row-actions export-links"><a class="button small" href="/api/social/exports.pdf">Export PDF</a><a class="button small" href="/api/social/exports.xlsx">Export Excel</a></div></div>
+        <form id="social-weekly-filter" class="inline-form"><label>From week<input type="date" name="start"></label><label>To week<input type="date" name="end"></label><label>Platform<select name="platform"><option value="">All five</option>${SOCIAL_PLATFORMS.map(([p,n])=>`<option value="${p}">${n}</option>`).join("")}</select></label><button class="button">Filter</button></form><div id="social-weekly-list">${reportList}</div></div>`;
+      const qNow=new Date(); const year=qNow.getFullYear(); const quarter=Math.floor(qNow.getMonth()/3)+1;
+      const quarterlyPanel=`<div class="panel"><h2>Quarterly management reports</h2><p class="hint">Quarterly reports consolidate approved weekly records—no duplicate re-entry. They preserve a snapshot and list source weekly report IDs, coverage, N/A totals and calculation methodology. Empty/unreported platforms remain N/A.</p>
+        <form id="social-quarter-generate" class="inline-form"><label>Year<input name="year" type="number" min="2000" max="2200" value="${year}" required></label><label>Quarter<select name="quarter">${[1,2,3,4].map(n=>`<option value="${n}" ${n===quarter?"selected":""}>Q${n}</option>`).join("")}</select></label><button class="button primary">Generate / refresh draft from approved weeks</button></form><div id="social-quarter-list">${socialQuarterCards(quarters)}</div></div>`;
+      const start=new Date();start.setDate(start.getDate()-90); const startValue=start.toISOString().slice(0,10);
+      const analyticsPanel=`<div class="panel"><h2>Performance graphs from approved saved data</h2><p class="hint">Filters use actual approved weekly records. Choose week, month or quarter to view growth in that period. Missing metrics remain N/A.</p>
+        <form id="social-analytics-filter" class="inline-form"><label>From<input type="date" name="start" value="${startValue}" required></label><label>To<input type="date" name="end" value="${today()}" required></label>
+        <label>Platform<select name="platform"><option value="">All platforms</option>${SOCIAL_PLATFORMS.map(([p,n])=>`<option value="${p}">${n}</option>`).join("")}</select></label>
+        <label>Growth period<select name="grain"><option value="week">Weekly</option><option value="month">Monthly</option><option value="quarter">Quarterly</option></select></label><button class="button primary">Refresh graphs</button></form>
+        <p id="social-engagement-method" class="hint"></p><div id="social-graphs" class="social-graphs"></div></div>`;
+      root.innerHTML=`<div class="page-heading"><div><h1>TBC Digital social media performance</h1><p>Weekly officer entry → Head review → quarterly consolidation and management approval.</p></div></div>${setup}<div class="panel"><h2>Weekly statistics by platform</h2><p class="hint">Each platform has its own reporting form. All metric fields start as N/A—not zero. Enter 0 only when the platform actually reports zero.</p>${accountCards}</div>${reportsPanel}${importPanel}${quarterlyPanel}${analyticsPanel}`;
+      await refreshSocialWeekly(); await refreshSocialAnalytics(startValue,today(),"","week");
+    } catch(e){root.innerHTML=`<div class="message error">${esc(e.message)}</div>`;}
+  }
+  function socialQuarterCards(rows) {
+    if(!rows.length)return `<div class="empty">No quarterly reports generated yet.</div>`;
+    return rows.map(q=>`<article class="task-card"><div class="panel-head"><h3>Q${q.quarter} ${q.year}</h3><span class="badge">${esc(q.status)}</span></div>
+      <p>${q.snapshot.approved_weekly_report_count} approved weekly report(s) consolidated · generated by ${esc(q.generated_by)} · ${esc(q.generated_at)}</p>
+      <p class="hint">${esc(q.snapshot.method)}<br><b>Engagement method:</b> ${esc(q.snapshot.engagement_formula)}</p>${q.management_notes?`<p><b>Management analysis/recommendations:</b> ${esc(q.management_notes)}</p>`:""}${q.review_comment?`<p><b>Management review:</b> ${esc(q.review_comment)}</p>`:""}
+      <details class="panel"><summary>Weekly best content and recommendations consolidated</summary>${q.snapshot.platforms.map(p=>`<h4>${esc(p.platform_name)} ${esc(p.account_handle||"")}</h4>${p.weekly_narratives.map(n=>`<p><b>${esc(n.reporting_week)} · report ${esc(n.report_id)}</b><br>Best content: ${esc(n.best_content||"N/A")}<br>Recommendations: ${esc(n.recommendations||"N/A")}</p>`).join("")||"<p>N/A</p>"}`).join("")}</details><div class="table-wrap"><table><thead><tr><th>Platform</th><th>Weeks</th><th>Audience start → end</th><th>Net growth</th><th>Growth %</th><th>Reach</th><th>Views</th><th>Engagement %</th><th>Posts / videos</th><th>Source report IDs</th></tr></thead><tbody>${q.snapshot.platforms.map(p=>`<tr><td>${esc(p.platform_name)} ${esc(p.account_handle||"")}</td><td>${p.weeks_reported}</td><td>${socialValue(p.audience_start)} → ${socialValue(p.audience_end)}</td><td>${socialValue(p.net_follower_growth)}</td><td>${socialPercent(p.audience_growth_percent)}</td><td>${socialValue(p.reach)}</td><td>${socialValue(p.views)}</td><td>${socialPercent(p.engagement_rate_percent)}</td><td>${socialValue(p.posts_published)} / ${socialValue(p.videos_published)}</td><td>${p.weekly_report_ids.map(esc).join(", ")||"N/A"}</td></tr>`).join("")}</tbody></table></div>
+      ${["Draft","Returned for Correction","Rejected"].includes(q.status)?`<form id="social-quarter-edit-${q.id}" class="form-grid"><label class="wide">Quarterly management analysis / recommendations<textarea name="management_notes" maxlength="20000">${esc(q.management_notes||"")}</textarea></label><div class="wide"><button class="button">Save analysis</button><button type="button" class="button primary" data-social-action="submit-quarter" data-id="${q.id}">Submit quarter for approval</button></div></form>`:""}
+      ${isRole("head_of_office")&&q.status==="Submitted"?`<div class="row-actions"><button class="button small primary" data-social-action="review-quarter" data-decision="approve" data-id="${q.id}">Approve quarter</button><button class="button small" data-social-action="review-quarter" data-decision="correction" data-id="${q.id}">Request correction</button><button class="button small danger" data-social-action="review-quarter" data-decision="reject" data-id="${q.id}">Reject quarter</button></div>`:""}
+      <div class="row-actions"><a class="button small" href="/api/social/quarters/${q.id}/exports.pdf">Download quarter PDF</a><a class="button small" href="/api/social/quarters/${q.id}/exports.xlsx">Download quarter Excel</a></div></article>`).join("");
+  }
+  function socialReportTable(rows) {
+    if(!rows.length)return `<div class="empty">No weekly report records match these filters.</div>`;
+    return `<div class="table-wrap"><table><thead><tr><th>Platform / account</th><th>Reporting week</th><th>Audience</th><th>Net growth</th><th>Engagement</th><th>Status</th><th>Source / entered by</th><th>Details / evidence / actions</th></tr></thead><tbody>${rows.map(r=>{
+      const editable=["Draft","Returned for Correction","Rejected"].includes(r.status);
+      const metricRows=SOCIAL_METRICS.map(([key,label])=>`<tr><th>${esc(label)}</th><td>${socialValue(r.metrics[key])}</td></tr>`).join("");
+      return `<tr><td>${esc(r.platform_name)}<br>${esc(r.account_handle)}</td><td>${esc(r.reporting_week)} – ${esc(r.reporting_week_end)}<br>Recorded ${esc(r.reporting_date)}</td>
+        <td>${socialValue(r.metrics.audience_start)} → ${socialValue(r.metrics.audience_end)}</td><td>${socialValue(r.calculations.net_follower_growth)}<br>${socialPercent(r.calculations.audience_growth_percent)}</td>
+        <td>${socialPercent(r.calculations.engagement_rate_percent)}<br><small>${esc(r.calculations.engagement_denominator)} denominator</small></td>
+        <td><span class="badge">${esc(r.status)}</span>${r.review_comment?`<br><small>${esc(r.review_comment)}</small>`:""}</td>
+        <td>${esc(r.source_label)}<br>${esc(r.entered_by)}<br>${esc(r.entered_at)}</td><td>
+        <details><summary>View all metrics and report notes</summary><div class="table-wrap"><table><tbody>${metricRows}</tbody></table></div>
+          <p><b>Best-performing content:</b> ${esc(r.best_content||"N/A")}</p><p><b>Comments/recommendations:</b> ${esc(r.recommendations||"N/A")}</p>
+          <p><b>Engagement formula:</b> ${esc(r.calculations.engagement_formula)}</p><div class="row-actions">${r.evidence.map(e=>`<a class="button small" href="/api/social/evidence/${e.id}">${esc(e.name)} · ${e.size_bytes} bytes</a>`).join(" ")||"No evidence"}</div></details>
+        ${editable?`<details><summary>Edit draft / correction</summary>${socialWeeklyForm(r.platform,r)}</details><button class="button small" data-social-action="submit-weekly" data-id="${r.id}">Submit for review</button>`:""}
+        ${isRole("head_of_office")&&r.status==="Submitted"?`<div class="row-actions"><button class="button small primary" data-social-action="review-weekly" data-decision="approve" data-id="${r.id}">Approve</button><button class="button small" data-social-action="review-weekly" data-decision="correction" data-id="${r.id}">Request correction</button><button class="button small danger" data-social-action="review-weekly" data-decision="reject" data-id="${r.id}">Reject</button></div>`:""}</td></tr>`;
+    }).join("")}</tbody></table></div>`;
+  }
+  async function refreshSocialWeekly() {
+    const form=$("#social-weekly-filter"); if(!form)return;
+    const params=new URLSearchParams(); for(const key of ["start","end","platform"])if(form.elements[key].value)params.set(key,form.elements[key].value);
+    const rows=await api(`/api/social/weekly?${params}`); state.socialReports=rows;
+    const target=$("#social-weekly-list"); if(!target)return;
+    target.innerHTML=socialReportTable(rows);
+  }
+  function socialBarChart(rows,key,title,formatter=(v)=>String(v)) {return window.SocialCharts.renderBarChart(rows,key,title,formatter);}
+  function socialTimeChart(series,key,title,formatter) {return socialBarChart(series,key,title,formatter);}
+  async function refreshSocialAnalytics(start,end,platform,grain) {
+    const target=$("#social-graphs");if(!target)return;
+    try {
+      const query=new URLSearchParams({start,end,grain});if(platform)query.set("platform",platform);
+      const data=await api(`/api/social/analytics?${query}`);
+      $("#social-engagement-method").textContent=data.formula;
+      const timeGrowth=socialTimeChart(data.series,"net_follower_growth",`${grain[0].toUpperCase()+grain.slice(1)} audience growth`,v=>`${v>0?"+":""}${v}`);
+      const comparisons=socialBarChart(data.platform_summary,"net_follower_growth","Platform comparison · net audience growth",v=>`${v>0?"+":""}${v}`);
+      const engagement=socialTimeChart(data.series,"engagement_rate_percent","Engagement rate by selected period (%)",v=>`${v}%`);
+      const reach=socialTimeChart(data.series,"reach","Reach by selected period");
+      const impressions=socialTimeChart(data.series,"impressions","Impressions by selected period");
+      const views=socialTimeChart(data.series,"views","Video views by selected period");
+      const posts=socialTimeChart(data.series,"posts_published","Posts published by selected period");
+      const videos=socialTimeChart(data.series,"videos_published","Videos published by selected period");
+      const compared=data.series.filter(x=>x.previous_period);
+      const previousTable=compared.length?`<details class="panel"><summary>Changes compared with the previous reported ${esc(grain)}</summary><div class="table-wrap"><table><thead><tr><th>Platform</th><th>Current period</th><th>Previous period</th><th>Net growth change</th><th>Engagement change (pp)</th><th>Reach change</th><th>Impressions change</th><th>Views change</th><th>Posts / videos change</th></tr></thead><tbody>${compared.map(x=>`<tr><td>${esc(x.platform_name)}</td><td>${esc(x.period)}</td><td>${esc(x.previous_period)}</td><td>${socialValue(x.changes_vs_previous.net_follower_growth)}</td><td>${socialValue(x.changes_vs_previous.engagement_rate_percent)}</td><td>${socialValue(x.changes_vs_previous.reach)}</td><td>${socialValue(x.changes_vs_previous.impressions)}</td><td>${socialValue(x.changes_vs_previous.views)}</td><td>${socialValue(x.changes_vs_previous.posts_published)} / ${socialValue(x.changes_vs_previous.videos_published)}</td></tr>`).join("")}</tbody></table></div><p class="hint">Each change is current period minus the preceding period for the same platform. N/A remains unavailable.</p></details>`:`<p class="hint">No preceding period is available for comparisons in this selected range.</p>`;
+      $("#social-graphs").innerHTML=`<p class="hint">${data.approved_weekly_report_count} approved weekly source report(s) in range.</p>${previousTable}<div class="social-chart-grid">${timeGrowth}${comparisons}${engagement}${reach}${impressions}${views}${posts}${videos}</div>`;
+    }catch(e){target.innerHTML=`<div class="message error">${esc(e.message)}</div>`;}
+  }
   async function loadAccounts() {
     const root=$("#view-accounts");
     if (!isRole("system_administrator")) { root.innerHTML=`<div class="message error">Administrator role required.</div>`; return; }
@@ -218,15 +345,94 @@
     state.activeView=name;
     $$(".view").forEach(v=>v.hidden=v.id!==`view-${name}`);
     $$(".nav-button").forEach(b=>b.classList.toggle("active",b.dataset.view===name));
-    const loaders={dashboard:loadDashboard,tasks:loadTasks,timetable:loadTimetable,reports:loadReports,analytics:loadAnalytics,equipment:loadEquipment,accounts:loadAccounts,audit:loadAudit};
+    const loaders={dashboard:loadDashboard,tasks:loadTasks,timetable:loadTimetable,reports:loadReports,analytics:loadAnalytics,equipment:loadEquipment,social:loadSocial,accounts:loadAccounts,audit:loadAudit};
     if (loaders[name]) await loaders[name]();
+  }
+  function socialBody(form, platform) {
+    const fd=new FormData(form),metrics={};
+    for(const [key] of SOCIAL_METRICS){const raw=String(fd.get(key)||"").trim();if(raw===""||raw.toUpperCase()==="N/A")metrics[key]=null;else if(/^\d+$/.test(raw))metrics[key]=Number(raw);else throw new Error(`${key.replaceAll("_"," ")} must be a whole number or N/A`);}
+    return {platform,reporting_date:fd.get("reporting_date"),reporting_week:fd.get("reporting_week"),metrics,
+      best_content:fd.get("best_content")||"",recommendations:fd.get("recommendations")||""};
+  }
+  async function uploadSocialEvidence(form, reportId) {
+    const files=form.elements.evidence?.files||[];if(!files.length)return;
+    const fd=new FormData();for(const f of files)fd.append("files",f);
+    await api(`/api/social/weekly/${reportId}/evidence`,{method:"POST",body:fd});
   }
   async function loadSubmissions(taskId) {
     const target=$(`#submissions-${taskId}`); if(!target) return;
     try {const rows=await api(`/api/tasks/${taskId}/submissions`); target.innerHTML=rows.length?rows.map(s=>`<div class="panel"><h3>Submission · ${esc(s.created_at.replace("T"," "))}</h3><p>${esc(s.report)}</p>${s.notes?`<p class="hint">${esc(s.notes)}</p>`:""}<div class="row-actions">${s.attachments.map(a=>`<a class="button small" href="/api/attachments/${a.id}">${esc(a.name)}</a>`).join("")}</div>${isRole("head_of_office","editor") && s.reviewable?`<div class="row-actions"><button class="button small primary" data-action="verify" data-id="${s.id}" data-decision="approve">Verify</button><button class="button small" data-action="verify" data-id="${s.id}" data-decision="request_correction">Request correction</button><button class="button small danger" data-action="verify" data-id="${s.id}" data-decision="reject">Reject</button></div>`:""}</div>`).join(""):`<p class="hint">No submissions yet.</p>`;}
     catch(e){target.innerHTML=`<div class="message error">${esc(e.message)}</div>`;}
   }
-  document.addEventListener("click", async event => {
+  document.addEventListener("submit", async event=>{
+    const form=event.target;
+    if(!form.id?.startsWith("social-"))return;
+    event.preventDefault(); const fd=new FormData(form);
+    try {
+      if(form.id.startsWith("social-create-")||form.id.startsWith("social-edit-")){
+        const reportId=form.dataset.report, body=socialBody(form,form.dataset.platform);
+        const result=reportId?await api(`/api/social/weekly/${reportId}`,{method:"PUT",body}):await api("/api/social/weekly",{method:"POST",body});
+        await uploadSocialEvidence(form,result.id);
+        message(reportId?"Corrected draft saved; resubmit it for review.":"Manual weekly draft saved. Add evidence before submitting.","success");
+        await loadSocial();return;
+      }
+      if(form.id.startsWith("social-account-")){
+        const platform=form.id.replace("social-account-","");
+        await api(`/api/social/accounts/${platform}`,{method:"PUT",body:{account_name:fd.get("account_name"),account_handle:fd.get("account_handle"),profile_url:fd.get("profile_url")||null}});
+        message("Verified social profile saved.","success");await loadSocial();return;
+      }
+      if(form.id==="social-officers"){
+        const user_ids=$$("input[name=user_ids]:checked",form).map(x=>Number(x.value));
+        await api("/api/social/officers",{method:"PUT",body:{user_ids}});message("Designated reporting officers saved.","success");await loadSocial();return;
+      }
+      if(form.id==="social-weekly-filter"){await refreshSocialWeekly();return;}
+      if(form.id==="social-analytics-filter"){
+        await refreshSocialAnalytics(fd.get("start"),fd.get("end"),fd.get("platform"),fd.get("grain"));return;
+      }
+      if(form.id==="social-quarter-generate"){
+        await api("/api/social/quarters/generate",{method:"POST",body:{year:Number(fd.get("year")),quarter:Number(fd.get("quarter"))}});
+        message("Quarterly report generated from approved weekly records.","success");await loadSocial();return;
+      }
+      if(form.id.startsWith("social-quarter-edit-")){
+        const id=form.id.replace("social-quarter-edit-","");
+        await api(`/api/social/quarters/${id}`,{method:"PUT",body:{management_notes:fd.get("management_notes")}});
+        message("Quarterly management notes saved.","success");await loadSocial();return;
+      }
+      if(form.id==="social-import"){
+        const file=form.elements.file.files[0];if(!file)throw new Error("Choose a CSV or XLSX file first");
+        state.socialPreviewFile=file;
+        const body=new FormData();body.append("file",file);
+        const preview=await api("/api/social/imports/preview",{method:"POST",body});
+        const errors=preview.errors.map(x=>`<li>Row ${x.row_number}: ${esc(x.error)}</li>`).join("");
+        const previewHead=SOCIAL_METRICS.map(([key,label])=>`<th>${esc(label)}</th>`).join("");
+        const ready=preview.rows.map(x=>`<tr><td>${x.row_number}</td><td>${esc(x.platform)}</td><td>${esc(x.reporting_date)}</td><td>${esc(x.reporting_week)}</td>${SOCIAL_METRICS.map(([key])=>`<td>${socialValue(x.metrics[key])}</td>`).join("")}<td>${esc(x.best_content||"N/A")}</td><td>${esc(x.recommendations||"N/A")}</td></tr>`).join("");
+        $("#social-import-preview").innerHTML=`<div class="message ${preview.can_commit?"success":"error"}" role="status">${preview.total_rows} row(s): ${preview.ready_count} ready; ${preview.error_count} error(s). ${preview.can_commit?"Review then import. No data is saved until you confirm import.":"Correct the listed rows/duplicate periods in the file and preview again."}</div>${ready?`<div class="table-wrap"><table><thead><tr><th>Row</th><th>Platform</th><th>Reporting date</th><th>Week</th>${previewHead}<th>Best content</th><th>Recommendations</th></tr></thead><tbody>${ready}</tbody></table></div>`:""}${errors?`<ul>${errors}</ul>`:""}${preview.can_commit?`<form id="social-import-commit"><p>Original file will be retained as evidence for each imported draft; source is labeled Imported from file.</p><button class="button primary">Confirm import ${preview.ready_count} row(s)</button></form>`:""}`;
+        return;
+      }
+      if(form.id==="social-import-commit"){
+        if(!state.socialPreviewFile)throw new Error("Select and preview the import file again");
+        const body=new FormData();body.append("file",state.socialPreviewFile);
+        const result=await api("/api/social/imports/commit",{method:"POST",body});
+        state.socialPreviewFile=null;message(`${result.created_count} imported draft report(s) saved with file evidence.`,"success");await loadSocial();return;
+      }
+    }catch(e){message(e.message,"error");}
+  });
+  document.addEventListener("click", async event=>{
+    const social=event.target.closest("[data-social-action]");
+    if(social){
+      const {socialAction,id,decision}=social.dataset;
+      try{
+        if(socialAction==="submit-weekly")await api(`/api/social/weekly/${id}/submit`,{method:"POST"});
+        else if(socialAction==="review-weekly"||socialAction==="review-quarter"){
+          let comment=prompt(decision==="approve"?"Optional approval comment:":"Enter the reason or correction request:","");
+          if(comment===null)return;if(decision!=="approve"&&comment.trim().length<3)throw new Error("Enter a review reason of at least 3 characters");
+          const path=socialAction==="review-weekly"?`/api/social/weekly/${id}/review`:`/api/social/quarters/${id}/review`;
+          await api(path,{method:"POST",body:{decision,comment}});
+        }else if(socialAction==="submit-quarter")await api(`/api/social/quarters/${id}/submit`,{method:"POST"});
+        message("Social media workflow action saved.","success");await loadSocial();
+      }catch(e){message(e.message,"error");}
+      return;
+    }
     const nav=event.target.closest("[data-view]"); if(nav){event.preventDefault(); await showView(nav.dataset.view); return;}
     const button=event.target.closest("[data-action]"); if(!button)return;
     const {action,id}=button.dataset;

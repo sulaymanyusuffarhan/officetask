@@ -4,7 +4,7 @@
 
 Open the internal office URL and sign in with the individual username/password supplied by the administrator. Do not share accounts. Your role controls available operations. Use **Change password** after first sign-in if a temporary password was used; passwords must be at least 12 characters. Use **Sign out** on shared computers. Sessions expire after the configured idle/lifetime window.
 
-The interface has Overview, Tasks, Weekly timetable, Shift reports and (for the Head) Performance. System setup and audit history are role-restricted. The system administrator is a technical role and cannot approve schedules or verify work merely by being an administrator.
+The interface has Overview, Tasks, Weekly timetable, Shift reports and (for the Head) Performance. The Head and designated social media officer also see **TBC Digital social media**. System setup and audit history are role-restricted. The system administrator is a technical role and cannot approve schedules or verify work merely by being an administrator.
 
 ## Staff / employee
 
@@ -54,6 +54,19 @@ The shared **Equipment & custody** page works with database-backed assets and is
 - Head/System Administrator reports show assignments/replacements, issues/returns by custodian, current/external/overdue borrowing, missing/damaged assets and handover history. Head/System Administrator can open each asset's full event and record-change history.
 
 Do not perform database edits to “fix” a loan. Use the application workflow so actor identity, timestamps and audit history are retained. See [Equipment & shift custody](EQUIPMENT_MANAGEMENT.md) for the end-to-end acceptance procedure.
+
+## TBC Digital social media reporting
+
+This is a manual-first reporting workflow. It requires no platform APIs, developer tokens, scraping, or social passwords.
+
+- **Head setup:** open the Social media page, register the verified real profile name/handle for each of YouTube, Facebook, Instagram, X and TikTok, and designate one or more active staff as reporting officers. The account IDs must be verified by your office; the software intentionally does not guess them.
+- **Weekly officer form:** use the separate form for each platform, enter reporting date and Monday week start, then enter the values shown in that platform's analytics. Type a number (enter `0` only if it is really zero) or keep `N/A` for unavailable metrics. Enter best-performing content and recommendations; upload screenshots/PDF/Excel/CSV evidence. A weekly report cannot be submitted without evidence.
+- **Submission and review:** save a draft, check the values/source and evidence, and submit. The Head can approve, reject with reason, or request a correction. Corrected reports are resubmitted; submitted and approved records are not silently editable. One record per platform/week is allowed.
+- **File import:** download the blank Excel/CSV template. Include all required columns and use N/A, not zero, where a metric is not available. Preview reports row errors and duplicates. Correct the file and preview again; only a clean preview can be confirmed. Imported drafts retain the source file as evidence and are marked Imported from file.
+- **Quarterly:** generate a quarter from approved weekly records, review the displayed coverage/N/A counts and saved calculations, add management analysis, and submit for Head approval. This is consolidation—do not re-enter weekly figures. Approved quarters are immutable.
+- **Charts and exports:** filter by date and platform; select weekly, monthly or quarterly growth. Charts cover audience growth, platform comparison, engagement, reach, impressions, views, posts and videos. Weekly and quarterly PDF/Excel exports are available. They use saved records, and unavailable totals remain N/A.
+
+See [TBC Digital social media reporting](SOCIAL_MEDIA_REPORTING.md) for the formula definitions, import columns and evidence rules. Use only figures copied from authentic analytics evidence; automated tests use isolated sample fixtures that are not official performance data.
 
 ## System administrator
 

@@ -8,11 +8,14 @@ python -m venv .venv
 # Linux/macOS: source .venv/bin/activate
 python -m pip install -r requirements-dev.txt
 python -m pytest -q
+node --test tests/test_social_charts.cjs
 ```
 
 The tests use an isolated file-backed SQLite database per test (with SQLite foreign keys enabled) and exercise authentication, Argon2 login, CSRF rejection, representative allowed/denied API access for all six roles, planner-to-head timetable approval/publication/versioning, task assignment/submission/verification, performance/analytics and PDF/XLSX exports, file upload validation/private download, audit access and throttling, and seven independent in-process sessions reading concurrently. Role checks are representative rather than exhaustive for every route; the concurrent-session test uses SQLite and performs reads, not PostgreSQL write-load testing.
 
 `tests/test_equipment.py` covers unique physical asset registration (including optional serials), accessory linking and automatic issue-line expansion, configured authorizer roles, denial of issue before authorization, actual custodian validation, distinct authorizer/issuer/borrower/receiver IDs, borrower acknowledgement, morning-to-evening shift handover with both acknowledgements, and the required partial-return/missing-charger scenario with asset history and report verification. The handover test asserts an open equipment loan remains open across the shift change. This is database-backed API coverage, not a browser or network-load test.
+
+`tests/test_social.py` exercises all five profile registrations with isolated test identifiers, designated-officer permissions and denial for other roles, complete weekly fields and explicit N/A, growth/engagement calculations, screenshot/PDF/XLSX/CSV evidence uploads/download, weekly approval/rejection/correction/resubmission/immutability, CSV preview/validation/commit/duplicate blocking and provenance, quarterly consolidation/approval/immutability, analytics data at all three time grains, and PDF/XLSX endpoint output that is parsed/checked. Test values and profile handles exist only in the per-test SQLite fixture. `tests/test_social_charts.cjs` runs the actual dependency-free SVG chart renderer in Node and checks weekly/monthly/quarterly output, N/A display, negative growth, and escaped labels. Node.js is needed only for this optional renderer test, not for the deployed app. This is code-level/renderer testing, not production-browser visual acceptance.
 
 ## Migration checks
 
