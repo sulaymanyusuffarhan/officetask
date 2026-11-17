@@ -1,65 +1,77 @@
 # Office Task & Performance Management System
 
-A private, self-hosted office application for weekly duty planning, daily task assignment, employee submissions, editorial verification and management reporting. The target installation is one Windows 11 office server and up to six other devices on the same trusted Wi-Fi/LAN; it is not designed for public internet exposure.
+A self-hosted FastAPI/PostgreSQL web application for an office LAN. The current repository contains a usable first operational release: local sign-in, role-scoped account administration, weekly timetable approval/publication, accountable task assignment, employee submissions with private attachments, editor verification, shift handovers, performance reports and Windows helper scripts.
 
-> **Current delivery status — Phase 1 foundation only.** The repository now has the application skeleton, branded local landing page, database connection/migration scaffolding, container configuration and smoke tests. Authentication, roles, employee workflows, reports, Windows operations scripts and production backup/restore are **not implemented yet**. Do not enter real employee or confidential information into this phase's application. Work will proceed in the phases in `docs/ROADMAP.md`.
+> **Deployment status:** Core workflows and tests are implemented, but the complete seven-device Windows 11 acceptance exercise, Docker Compose runtime, firewall restrictions, HTTPS on the office Wi-Fi, scheduled-task behavior, backup/restore drill and simultaneous-user load test have **not** been validated in this development environment. Do not treat this branch as security-certified or put real personnel records into production until your IT administrator has followed the hardening and recovery gates in `docs/WINDOWS_INSTALLATION.md` and `docs/SECURITY.md`.
 
-## What is in this phase
+The official supplied images are stored unmodified under `app/static/images/`. The browser uses local CSS and JavaScript; no CDN is required.
 
-- FastAPI service, configuration from environment variables, SQLAlchemy 2 base/session and PostgreSQL connectivity/readiness checks.
-- Alembic migration scaffolding; no business schema has been created yet.
-- Docker Compose setup with a private PostgreSQL container (no database host port) and persistent database/upload/backup volumes.
-- Local static CSS and the two supplied, unmodified brand images.
-- A clear foundation status page, liveness/readiness endpoints and tests.
-- Architecture, deployment boundary, roadmap and security decisions documented under `docs/`.
+## Included functionality
 
-## Quick start (Docker Compose)
+- Argon2 password hashing, signed HttpOnly session cookie, CSRF token on state-changing requests, session expiry, login throttling, and backend role checks.
+- Six roles: Head of Office, Weekly Timetable Planner, Editor, Shift Leader, Staff/Employee, System Administrator. The technical admin role does not receive business review rights.
+- PostgreSQL tables and Alembic migrations for users, roles, departments, shifts, timetable versions/allocations, tasks/status history, submissions, attachments, verifications, attendance, shift reports and audit events.
+- Weekly schedule creation/copy, allocation conflict checks, submit/review/return/approve/publish workflow, and required reasons/audit when creating published versions or editing allocations.
+- Individual task rows per employee, acknowledgment/progress, written submissions, validated private attachments, review/correction/rejection/resubmission, verified status and management reopen with a reason.
+- Shift handover reports, attendance exceptions, date-filtered planned-vs-actual performance, submission vs verified rates, and PDF/Excel/CSV exports.
+- Database-backed dashboards, local responsive UI, Windows batch wrappers and PowerShell installation/start/stop/backup/restore/task-scheduling scripts.
 
-Requirements: Docker Desktop with Compose v2, a Windows 11/Linux/macOS development computer, and a LAN firewall policy appropriate for the office. First-run image builds need registry access; once built, the application and assets are served locally without a browser internet connection.
+The UI provides task creation/submission, schedule and review workflows, reports, account setup, and audit history. The API is documented at `/api/docs` when `APP_ENV` is not `production`.
 
-1. Copy `.env.example` to `.env`.
-2. Edit `.env`. Set a unique strong `SECRET_KEY` (at least 32 random bytes) and a unique `POSTGRES_PASSWORD`. Use URL-safe letters and digits for the database password unless you correctly URL-encode special characters in `DATABASE_URL` for direct Python runs. **Never commit `.env`.**
-3. Run `docker compose up --build -d`.
-4. Check `docker compose ps` and open `http://localhost:8000`. `/api/health/live` checks the process; `/api/health/ready` checks PostgreSQL.
-5. Stop with `docker compose down`. This preserves named volumes. `docker compose down -v` deletes the data volumes and is destructive; do not use it on an office installation.
+## Windows 11 installation
 
-`APP_BIND_IP` controls the host interface Docker publishes to. Its default is `0.0.0.0` to allow LAN clients. In an office deployment, use the server's reserved LAN address where possible, and configure Windows Defender Firewall to allow TCP 8000 **only from the office subnet**. Do not enable router port forwarding. PostgreSQL has no published port.
+See the beginner-oriented [Windows 11 installation guide](docs/WINDOWS_INSTALLATION.md). This deployment uses Docker Desktop and Docker Compose, not native PostgreSQL/Python services.
 
-## Local Python development
+1. Install Docker Desktop for Windows 11; start it and wait for the engine to be ready.
+2. Download/extract the repository on the server computer.
+3. Run `install_windows.bat` from an elevated terminal. It creates `.env` with random secrets when missing, asks for the trusted office LAN subnet for a restricted firewall rule, starts containers, migrates the schema, seeds roles, and prompts for the first technical administrator.
+4. Sign in locally and create the Head of Office, planner, editors, shift leaders, and staff accounts. Share temporary passwords securely, not through source control or this chat.
+5. Configure a static IP or DHCP reservation. From other office devices, open `http://<reserved-server-ip>:8000` only after firewall and network checks.
+6. Configure HTTPS with an organization-approved certificate before sending credentials over Wi-Fi; see the security guide.
 
-Python 3.11 or newer and a reachable PostgreSQL server are required. Create a virtual environment, install `requirements-dev.txt`, copy `.env.example` to `.env`, and adjust `DATABASE_URL` for the local database. Then run:
+Initial Docker image/package downloads require network access. After installation, the application and UI assets are local; PostgreSQL remains private to Docker and the browser does not need internet connectivity. Docker Desktop must be configured to start when the server user's Windows session starts. Container `restart: unless-stopped` restarts services when Docker is available; the optional logon task is not a Windows service and does not start Docker before user logon.
 
-```bash
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+## First-time database and administrator commands
+
+The Windows installer runs these inside the app container:
+
+```powershell
+docker compose exec -T web python -m app.cli init-db
+docker compose exec web python -m app.cli create-admin
 ```
 
-The only interactive page at this stage is a branded status page. API docs are at `/api/docs` in non-production configuration. Do not use the development configuration or reload server as the hardened office deployment.
+Never publish a bootstrap administrator endpoint to the network. The CLI prompts for the password without echoing it. Admin accounts configure the system but do not approve timetables or verify tasks unless they also have an explicitly assigned business account/role.
 
-## Configuration
+## Development and tests
 
-See `.env.example` for the environment variable catalogue. Settings can be supplied through environment variables or a local `.env` file. The local storage directories are intentionally not exposed as public static content. Upload authorization, file validation, session security and the operational backup scheduler are future phases; the values and volumes are scaffolding, not a claim that those capabilities are already active.
-
-## Tests
+Python 3.11+, PostgreSQL for full local development, and Docker Compose for the server stack are intended. Create a virtual environment before installing packages:
 
 ```bash
+python -m venv .venv
+# Windows: .venv\Scripts\activate
+# Linux/macOS: source .venv/bin/activate
 python -m pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
-The phase-one tests exercise the root status page, local branding URLs and process liveness. Business workflow, concurrency, security, Windows LAN and recovery tests will be added alongside their implementation. A passing smoke-test suite is not production acceptance.
+Tests use an isolated SQLite in-memory database and cover auth/CSRF/role separation, timetable creation and approval/publication/version locking/conflicts, task assignment and submission/review, report calculations/exports, file upload rules, audit access and login throttling. They do **not** prove PostgreSQL/Docker/Windows production compatibility or the required multi-device concurrency acceptance test.
 
-## Windows 11 status
+To use Compose, copy `.env.example` to `.env`, replace both example secrets, choose `APP_BIND_IP` and an office `APP_PORT`, then run `docker compose up --build -d`. PostgreSQL port 5432 is never published. Do not run `docker compose down -v` on a working installation; it deletes the database volume.
 
-The planned Windows install/start/stop/backup/restore scripts and first-run administrator workflow are tracked for later delivery (`docs/ROADMAP.md`). The current repository does **not** yet satisfy the final Windows installation or office operational acceptance criteria. For now, Docker Compose is the development/deployment foundation, not a finished Windows installer.
+## Backups and recovery
+
+`backup_database.bat` captures a custom-format PostgreSQL dump and uploads ZIP in one timestamped folder, verifies the dump/archive, records SHA-256 hashes and applies `BACKUP_RETENTION_DAYS`. The service is paused briefly to keep the database/files snapshot paired. `restore_database.bat` verifies the manifest, requires typing `RESTORE`, restores both parts and preserves the previous uploads folder. See [Backup and recovery](docs/BACKUP_RECOVERY.md). `install_backup_task.bat` registers a daily scheduled backup (requires an administrator terminal and local Windows account password prompt). **Backups are not a substitute for a second protected off-host copy. Run a restore drill before live data.**
 
 ## Project documentation
 
-- [System architecture and trust boundaries](docs/ARCHITECTURE.md)
-- [Development roadmap and phase exit criteria](docs/ROADMAP.md)
-- [Security and deployment decisions](docs/SECURITY.md)
-- [Testing guide](docs/TESTING.md)
-- [Change log](CHANGELOG.md)
+- [Windows 11 installation and LAN setup](docs/WINDOWS_INSTALLATION.md)
+- [User manual](docs/USER_MANUAL.md)
+- [System architecture](docs/ARCHITECTURE.md)
+- [Security and deployment gates](docs/SECURITY.md)
+- [Backup and recovery](docs/BACKUP_RECOVERY.md)
+- [Tests and coverage](docs/TESTING.md)
+- [Roadmap / acceptance status](docs/ROADMAP.md)
 
-## License and branding
+## Branding, privacy and license
 
-The supplied images are placed in `app/static/images/` without alteration. Confirm the organization's rights and usage requirements before external redistribution. A project license has not yet been selected.
+The supplied emblem and TBC Digital logo are kept at their original proportions in local assets. Confirm institutional rights before redistribution. Use only fake/test information in development. No project license has been selected yet.

@@ -1,27 +1,49 @@
 # Testing guide
 
-## Run phase-one tests
+## Automated local tests
 
 ```bash
+python -m venv .venv
+# Windows: .venv\Scripts\activate
+# Linux/macOS: source .venv/bin/activate
 python -m pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
-These tests use FastAPI's test client and do not require a running PostgreSQL instance. They cover the status page's non-operational warning, liveness and availability of local logo assets. The readiness endpoint expects a real PostgreSQL connection; validate it with Compose once migrations and deployment setup are in place.
+The tests use isolated in-memory SQLite and exercise authentication, Argon2 login, CSRF rejection, role denial, planner-to-head timetable review/publication/version locking and conflict detection, task assignment/progress/submission/verification, self-review prevention, planned-vs-actual calculations, PDF/XLSX generation, file upload validation/private download, admin/business-role separation, audit access and login throttling.
 
-## Compose smoke check
+## Migration checks
 
-After configuring `.env` as in the README:
+When a PostgreSQL service is available:
 
 ```bash
-docker compose config
-# Once built and started:
-docker compose ps
-# Visit /api/health/live and /api/health/ready from the server.
+alembic upgrade head
+alembic current
+alembic check
 ```
 
-Confirm port 5432 is not listening on the Windows host. Confirm the app is reachable from an authorized office client, and inaccessible from outside the allowed subnet. Do not run destructive Compose volume deletion against office data.
+For syntax/DDL generation without applying to a database:
 
-## Planned test coverage
+```bash
+alembic upgrade head --sql
+```
 
-Add focused tests in their implementation phase for passwords/sessions, each role/record scope, CSRF, timetable constraints and versioning, task state transitions, upload security, independent reviewer verification, report calculations, append-only audit events, simultaneous writes, and backup/restore. End-to-end deployment tests must include multiple client sessions and a restore into a clean environment. No such coverage is claimed in phase one.
+Do not generate production migrations against SQLite and assume that is proof of PostgreSQL compatibility. Review every migration and test upgrades and downgrades against the intended PostgreSQL version.
+
+## Compose/Windows smoke checks
+
+On a Windows 11 server with Docker Desktop:
+
+```powershell
+docker compose config
+docker compose up --build -d
+docker compose ps
+Invoke-WebRequest http://localhost:8000/api/health/live
+Invoke-WebRequest http://localhost:8000/api/health/ready
+```
+
+Verify TCP 5432 is not bound on the Windows host. Test allowed/denied client subnet access, sign-in/session expiration, role boundaries and access to private attachments. Restore a paired DB/files backup into a test environment, verify hashes and at least one downloaded attachment.
+
+## Not tested here
+
+The scripts and Compose deployment could not be run in this environment because Docker/Windows are not installed. Unit tests do not prove seven simultaneous users, production TLS, firewall correctness, persistent-volume recovery, backup schedule behavior, or PostgreSQL locking under simultaneous edits. These are required acceptance tests before live use.
