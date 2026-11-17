@@ -14,6 +14,7 @@ The FastAPI service is the only employee-facing entry point. PostgreSQL runs on 
 - File extension allowlist, content signatures for PDF/PNG/JPEG/Office ZIP containers, per-file size limit, 10-file limit, random storage name, private storage and authenticated download authorization.
 - PostgreSQL has no host port mapping; local CSS/JS; Compose container runs as a non-root user; secrets live in untracked `.env`.
 - Database/upload paired-backup tooling, manifest checksums, restore confirmation, and access-restricted LAN firewall helper.
+- Equipment APIs enforce authorizer-role policy, active assigned/replacement custodian checks for physical issue/return, private authenticated photo access, unique individual assets, no direct completed-transaction deletion, per-item condition/status checks, audit events, and row locks on assets during PostgreSQL issue operations.
 
 ## Known gaps — not security-certified
 

@@ -13,6 +13,7 @@ from app.db.session import engine
 from app.api.routes import router as api_router
 from app.api.export_routes import router as report_router
 from app.api.analytics import router as analytics_router
+from app.api.equipment import router as equipment_router
 
 
 settings = get_settings()
@@ -62,6 +63,7 @@ app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 app.include_router(api_router)
 app.include_router(report_router)
 app.include_router(analytics_router)
+app.include_router(equipment_router)
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)

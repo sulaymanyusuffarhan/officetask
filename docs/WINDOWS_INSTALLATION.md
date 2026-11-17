@@ -21,7 +21,7 @@ Windows scripts in this repository are authored but have not been executed on a 
 5. Protect `.env` in File Explorer → Properties → Security. Only the server operator and authorized Windows administrators should read it. Never upload it to GitHub or send it in chat.
 6. In Docker Desktop, enable **Start Docker Desktop when you sign in** for the Windows account that owns the app. The containers use `restart: unless-stopped`; they restart when the Docker engine starts. Optional `install_autostart_task.bat` starts Compose at that account's logon, but does not run Docker before sign-in.
 
-The script may need outbound internet on first build to fetch container images and Python packages. Once built, browser access and the application assets are served locally.
+The script may need outbound internet on first build to fetch container images and Python packages. Once built, browser access and the application assets are served locally. `.env` defaults `OFFICE_TIMEZONE=Africa/Dar_es_Salaam`; change it to the office's valid IANA timezone before staff use shift dashboards and issue/return dates. Transaction timestamps are stored in UTC.
 
 ## 3. HTTPS and credentials
 
@@ -49,7 +49,10 @@ From an authorized office computer, browse to `http://<reserved-server-ip>:8000`
 3. Create departments and configure shift names/hours. Avoid assigning the System Administrator to business workflows.
 4. Sign in as the planner, create Monday-starting weekly plans, allocate staff, editors and leaders, then submit.
 5. Sign in as the Head of Office, review/return/approve and publish. Once published, use a reasoned new version for corrections.
-6. Editors create one task record per accountable employee. Employees acknowledge, progress, submit written reports and allowed attachments. Editors verify, request corrections or reject with a reason. Head dashboard and reports distinguish submitted from verified work.
+6. In **Equipment & custody**, the Head first saves the authorized-borrower roles (until configured, authorization is denied), then the Head/System Administrator assigns dated custodians for Morning/Afternoon/Evening shifts. Register each device and accessory as a separate asset with a unique asset number; link accessories and add photo, current location, condition, optional serial, purchase and warranty details. Test request → authorization → actual custodian issue → borrower acknowledgement → cross-shift handover → partial return/missing → inspection with test records.
+7. Editors create one task record per accountable employee. Employees acknowledge, progress, submit written reports and allowed attachments. Editors verify, request corrections or reject with a reason. Head dashboard and reports distinguish submitted from verified work.
+
+See [Equipment & shift custody](EQUIPMENT_MANAGEMENT.md) for detailed role permissions, workflow, reports and scenario test. Migration `bf8103392858` is applied by the normal installer / `python -m app.cli init-db` update path.
 
 ## 6. Start, stop and scheduled tasks
 

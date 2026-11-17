@@ -10,7 +10,9 @@ python -m pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
-The tests use an isolated file-backed SQLite database per test (with SQLite foreign keys enabled) and exercise authentication, Argon2 login, CSRF rejection, a six-role API access matrix, planner-to-head timetable review/publication/version locking and conflict detection, task assignment/progress/submission/verification, self-review prevention, performance/analytics and PDF/XLSX generation, file upload validation/private download, admin/business-role separation, audit access, login throttling, and seven independent authenticated TestClient sessions reading concurrently. This concurrency check is a lightweight application/session check, not a network load test or proof of PostgreSQL locking behavior.
+The tests use an isolated file-backed SQLite database per test (with SQLite foreign keys enabled) and exercise authentication, Argon2 login, CSRF rejection, the six-role API access matrix, planner-to-head timetable approval/publication/versioning, task assignment/submission/verification, performance/analytics and PDF/XLSX exports, file upload validation/private download, audit access and throttling, and seven independent in-process sessions reading concurrently.
+
+`tests/test_equipment.py` covers unique physical asset registration (including optional serials), accessory linking and automatic issue-line expansion, configured authorizer roles, denial of issue before authorization, actual custodian validation, distinct authorizer/issuer/borrower/receiver IDs, borrower acknowledgement, morning-to-evening shift handover with both acknowledgements, and the required partial-return/missing-charger scenario with asset history and report verification. The handover test asserts an open equipment loan remains open across the shift change. This is database-backed API coverage, not a browser or network-load test.
 
 ## Migration checks
 

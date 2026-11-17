@@ -186,3 +186,157 @@ class AuditLog(Base):
     entity_id: Mapped[str] = mapped_column(String(80), nullable=False)
     details: Mapped[str] = mapped_column(Text, default="", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True, nullable=False)
+
+
+class EquipmentAsset(Base):
+    __tablename__ = "equipment_assets"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    asset_tag: Mapped[str] = mapped_column(String(50), unique=True, index=True, nullable=False)
+    category: Mapped[str] = mapped_column(String(80), index=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    brand: Mapped[str] = mapped_column(String(100), default="", nullable=False)
+    model: Mapped[str] = mapped_column(String(120), default="", nullable=False)
+    serial_number: Mapped[str | None] = mapped_column(String(120), unique=True)
+    internal_tag: Mapped[str] = mapped_column(String(100), default="", nullable=False)
+    photo_name: Mapped[str | None] = mapped_column(String(100), unique=True)
+    location: Mapped[str] = mapped_column(String(160), default="Equipment store", nullable=False)
+    responsible_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    department_id: Mapped[int | None] = mapped_column(ForeignKey("departments.id"))
+    condition: Mapped[str] = mapped_column(String(30), default="Good", nullable=False)
+    availability: Mapped[str] = mapped_column(String(30), default="Available", index=True, nullable=False)
+    purchase_date: Mapped[date | None] = mapped_column(Date)
+    warranty_until: Mapped[date | None] = mapped_column(Date)
+    notes: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+
+
+class EquipmentAccessoryLink(Base):
+    __tablename__ = "equipment_accessory_links"
+    __table_args__ = (UniqueConstraint("parent_asset_id", "accessory_asset_id", name="uq_equipment_accessory_pair"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    parent_asset_id: Mapped[int] = mapped_column(ForeignKey("equipment_assets.id"), index=True, nullable=False)
+    accessory_asset_id: Mapped[int] = mapped_column(ForeignKey("equipment_assets.id"), index=True, nullable=False)
+    linked_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    linked_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+
+
+class EquipmentCustodianAssignment(Base):
+    __tablename__ = "equipment_custodian_assignments"
+    __table_args__ = (UniqueConstraint("shift_id", "custodian_id", "effective_from", name="uq_equipment_shift_custodian_start"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    shift_id: Mapped[int] = mapped_column(ForeignKey("shifts.id"), index=True, nullable=False)
+    custodian_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True, nullable=False)
+    effective_from: Mapped[date] = mapped_column(Date, index=True, nullable=False)
+    effective_to: Mapped[date | None] = mapped_column(Date, index=True)
+    assigned_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    assigned_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, default="", nullable=False)
+
+
+class EquipmentCustodianReplacement(Base):
+    __tablename__ = "equipment_custodian_replacements"
+    __table_args__ = (UniqueConstraint("shift_id", "shift_date", "original_custodian_id", name="uq_equipment_custodian_replacement_date"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    shift_id: Mapped[int] = mapped_column(ForeignKey("shifts.id"), index=True, nullable=False)
+    shift_date: Mapped[date] = mapped_column(Date, index=True, nullable=False)
+    original_custodian_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    replacement_custodian_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    designated_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+
+
+class EquipmentAuthorizationRole(Base):
+    __tablename__ = "equipment_authorization_roles"
+    role_id: Mapped[str] = mapped_column(ForeignKey("roles.id"), primary_key=True)
+    configured_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    configured_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+
+
+class EquipmentIssue(Base):
+    __tablename__ = "equipment_issues"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    requester_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True, nullable=False)
+    borrower_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), index=True)
+    borrower_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    borrower_office: Mapped[str] = mapped_column(String(160), default="Office", nullable=False)
+    external: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    requested_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    shift_id: Mapped[int] = mapped_column(ForeignKey("shifts.id"), nullable=False)
+    shift_date: Mapped[date] = mapped_column(Date, index=True, nullable=False)
+    expected_return_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    purpose: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    status: Mapped[str] = mapped_column(String(30), default="Pending authorization", index=True, nullable=False)
+    authorized_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    authorized_role_id: Mapped[str | None] = mapped_column(String(40))
+    authorization_method: Mapped[str | None] = mapped_column(String(40))
+    authorization_remarks: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    authorized_at: Mapped[datetime | None] = mapped_column(DateTime)
+    issued_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    issued_at: Mapped[datetime | None] = mapped_column(DateTime)
+    borrower_acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime)
+    borrower_acknowledged_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    borrower_acknowledged_name: Mapped[str | None] = mapped_column(String(160))
+
+
+class EquipmentIssueItem(Base):
+    __tablename__ = "equipment_issue_items"
+    __table_args__ = (UniqueConstraint("issue_id", "asset_id", name="uq_equipment_issue_asset"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    issue_id: Mapped[int] = mapped_column(ForeignKey("equipment_issues.id"), index=True, nullable=False)
+    asset_id: Mapped[int] = mapped_column(ForeignKey("equipment_assets.id"), index=True, nullable=False)
+    condition_before: Mapped[str | None] = mapped_column(String(30))
+    return_condition: Mapped[str | None] = mapped_column(String(30))
+    returned_at: Mapped[datetime | None] = mapped_column(DateTime, index=True)
+    received_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    damage_notes: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    missing_reported: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    location_before_issue: Mapped[str | None] = mapped_column(String(160))
+    responsible_user_before_issue_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    department_before_issue_id: Mapped[int | None] = mapped_column(ForeignKey("departments.id"))
+
+
+class EquipmentItemEvent(Base):
+    __tablename__ = "equipment_item_events"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    issue_id: Mapped[int] = mapped_column(ForeignKey("equipment_issues.id"), index=True, nullable=False)
+    issue_item_id: Mapped[int] = mapped_column(ForeignKey("equipment_issue_items.id"), index=True, nullable=False)
+    asset_id: Mapped[int] = mapped_column(ForeignKey("equipment_assets.id"), index=True, nullable=False)
+    actor_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(40), index=True, nullable=False)
+    shift_id: Mapped[int | None] = mapped_column(ForeignKey("shifts.id"), index=True)
+    shift_date: Mapped[date | None] = mapped_column(Date, index=True)
+    condition: Mapped[str | None] = mapped_column(String(30))
+    details: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    happened_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True, nullable=False)
+
+
+class EquipmentHandover(Base):
+    __tablename__ = "equipment_handovers"
+    __table_args__ = (UniqueConstraint("outgoing_shift_id", "incoming_shift_id", "shift_date", "outgoing_custodian_id", "incoming_custodian_id", name="uq_equipment_handover_pair"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    outgoing_shift_id: Mapped[int] = mapped_column(ForeignKey("shifts.id"), index=True, nullable=False)
+    incoming_shift_id: Mapped[int] = mapped_column(ForeignKey("shifts.id"), index=True, nullable=False)
+    shift_date: Mapped[date] = mapped_column(Date, index=True, nullable=False)
+    outgoing_custodian_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    incoming_custodian_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    outgoing_ack_at: Mapped[datetime | None] = mapped_column(DateTime)
+    incoming_ack_at: Mapped[datetime | None] = mapped_column(DateTime)
+    discrepancies: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    reviewed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    review_comment: Mapped[str] = mapped_column(Text, default="", nullable=False)
+
+
+class EquipmentHandoverLine(Base):
+    __tablename__ = "equipment_handover_lines"
+    __table_args__ = (UniqueConstraint("handover_id", "issue_item_id", name="uq_equipment_handover_issue_item"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    handover_id: Mapped[int] = mapped_column(ForeignKey("equipment_handovers.id"), index=True, nullable=False)
+    issue_item_id: Mapped[int] = mapped_column(ForeignKey("equipment_issue_items.id"), nullable=False)
+    asset_id: Mapped[int] = mapped_column(ForeignKey("equipment_assets.id"), nullable=False)
+    asset_tag_snapshot: Mapped[str] = mapped_column(String(50), nullable=False)

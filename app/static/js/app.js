@@ -161,6 +161,54 @@
     try {const users=await api("/api/users"); $("#accounts-list").innerHTML=`<div class="table-wrap"><table><thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Department</th><th>Status</th><th></th></tr></thead><tbody>${users.map(u=>`<tr><td>${esc(u.full_name)}</td><td>${esc(u.username)}</td><td><select class="account-role" data-id="${u.id}">${roles.map(r=>`<option value="${r.id}" ${r.id===u.role_id?"selected":""}>${esc(r.name)}</option>`).join("")}</select></td><td><select class="account-dept" data-id="${u.id}"><option value="">None</option>${state.departments.map(d=>`<option value="${d.id}" ${d.id===u.department_id?"selected":""}>${esc(d.name)}</option>`).join("")}</select></td><td>${u.active?"Active":"Disabled"}</td><td><button class="button small" data-action="user-role" data-id="${u.id}">Save role/dept</button> <button class="button small" data-action="user-active" data-id="${u.id}" data-active="${!u.active}">${u.active?"Disable":"Enable"}</button> <button class="button small" data-action="user-reset" data-id="${u.id}">Reset password</button></td></tr>`).join("")}</tbody></table></div>`;}
     catch(e) { $("#accounts-list").textContent=e.message; }
   }
+  const eqOptions = (items, valueKey="id", labelKey="name") => items.map(x=>`<option value="${esc(x[valueKey])}">${esc(x[labelKey])}</option>`).join("");
+  const eqDate = () => {const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;};
+  const eqDateTime = () => {const d=new Date(Date.now()+2*60*60*1000);d.setMinutes(d.getMinutes()-d.getTimezoneOffset());return d.toISOString().slice(0,16);};
+  async function loadEquipment() {
+    const root=$("#view-equipment"); root.innerHTML=`<div class="page-heading"><div><h1>Equipment &amp; custody</h1><p>Live registered assets, shift custodians, authorizations, issues, returns and handovers.</p></div></div><p class="empty">Loading equipment records…</p>`;
+    try {
+      const [d,assets,issues,shifts,roster,handovers,auth] = await Promise.all([
+        api("/api/equipment/dashboard"),api("/api/equipment/assets"),api("/api/equipment/requests"),
+        api("/api/equipment/shifts"),api(`/api/equipment/custodians?shift_date=${eqDate()}`),
+        api("/api/equipment/handovers"),api("/api/equipment/authorization-roles")]);
+      state.equipmentAssets=assets; state.equipmentIssues=issues; state.equipmentShifts=shifts; state.equipmentRoster=roster;
+      const cards=[["Current shift custodian",`${d.current_shift?.name||"—"}: ${(d.current_shift_custodians||[]).map(x=>x.name).join(", ")||"not assigned"}`],
+        ["Previous shift custodian",`${d.previous_shift?.name||"—"}: ${(d.previous_shift_custodians||[]).map(x=>x.name).join(", ")||"not assigned"}`],
+        ["Incoming shift custodian",`${d.incoming_shift?.name||"—"}: ${(d.incoming_shift_custodians||[]).map(x=>x.name).join(", ")||"not assigned"}`],
+        ["Equipment in custody",d.equipment_in_custody],["Issued this shift",d.issued_during_current_shift],
+        ["Returned this shift",d.returned_during_current_shift],["Outstanding",d.outstanding_equipment],
+        ["Overdue",d.overdue_equipment],["Missing",d.missing_equipment],["Damaged / inspection",d.damaged_equipment],
+        ["Pending authorization",d.pending_authorization]];
+      const canManage=isRole("head_of_office","system_administrator");
+      const assetForm=canManage?`<div class="panel"><h2>Register an individual physical asset</h2><p class="hint">After registration, use the Photo action to upload its required private PNG/JPEG photograph; assets without photos cannot be requested for issue.</p><form id="eq-asset-create" class="form-grid">
+        <label>Unique asset number<input name="asset_tag" placeholder="CAM-001" required maxlength="50"></label><label>Category<input name="category" placeholder="Camera" required></label>
+        <label>Equipment name<input name="name" placeholder="Camera body" required></label><label>Brand<input name="brand"></label>
+        <label>Exact model<input name="model"></label><label>Serial number (optional)<input name="serial_number"></label>
+        <label>Internal asset tag<input name="internal_tag"></label><label>Current location<input name="location" value="Equipment store"></label>
+        <label>Condition<select name="condition"><option>New</option><option selected>Good</option><option>Fair</option><option>Poor</option></select></label>
+        <label>Purchase date<input type="date" name="purchase_date"></label><label>Warranty until<input type="date" name="warranty_until"></label>
+        <label>Department<select name="department_id"><option value="">None</option>${state.departments.map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join("")}</select></label>
+        <label>Responsible user<select name="responsible_user_id"><option value="">None</option>${state.people.map(x=>`<option value="${x.id}">${esc(x.full_name)}</option>`).join("")}</select></label>
+        <label class="wide">Notes<textarea name="notes"></textarea></label><div class="wide"><button class="button primary">Register asset</button></div></form></div>
+        <div class="panel"><h2>Accessory relationship</h2><form id="eq-accessory-link" class="inline-form"><label>Main equipment<select name="parent_asset_id" required>${assets.map(a=>`<option value="${a.id}">${esc(a.asset_tag)} · ${esc(a.name)}</option>`).join("")}</select></label><label>Accessory<select name="accessory_asset_id" required>${assets.map(a=>`<option value="${a.id}">${esc(a.asset_tag)} · ${esc(a.name)}</option>`).join("")}</select></label><button class="button">Link individual accessory</button></form></div>`:"";
+      const custodyPanel=canManage?`<div class="panel"><h2>Assign shift custodians</h2><form id="eq-custodian-assign" class="form-grid"><label>Shift<select name="shift_id">${eqOptions(shifts)}</select></label><label>Custodian<select name="custodian_id">${state.people.map(p=>`<option value="${p.id}">${esc(p.full_name)}</option>`).join("")}</select></label><label>Effective from<input type="date" name="effective_from" value="${eqDate()}" required></label><label>Effective to (optional)<input type="date" name="effective_to"></label><label class="wide">Assignment note<input name="reason"></label><div class="wide"><button class="button">Record custodian assignment</button></div></form>
+        <h3>Replacement for absence</h3><form id="eq-custodian-replace" class="form-grid"><label>Shift<select name="shift_id">${eqOptions(shifts)}</select></label><label>Date<input type="date" name="shift_date" value="${eqDate()}" required></label><label>Original custodian<select name="original_custodian_id">${state.people.map(p=>`<option value="${p.id}">${esc(p.full_name)}</option>`).join("")}</select></label><label>Replacement<select name="replacement_custodian_id">${state.people.map(p=>`<option value="${p.id}">${esc(p.full_name)}</option>`).join("")}</select></label><label class="wide">Reason (required)<input name="reason" required minlength="3"></label><div class="wide"><button class="button">Record replacement</button></div></form>
+        ${isRole("head_of_office")?`<h3>Authorization roles</h3><form id="eq-auth-roles" class="inline-form"><label>Roles permitted to authorize <select name="roles" multiple size="4">${(await api("/api/roles")).map(r=>`<option value="${esc(r.id)}" ${auth.roles.includes(r.id)?"selected":""}>${esc(r.name)}</option>`).join("")}</select></label><button class="button">Save authorization policy</button><span class="hint">The Head of Office configures policy; an empty policy blocks all issue authorization.</span></form>`:""}</div>`:"";
+      const issueForm=`<div class="panel"><h2>Request equipment</h2><form id="eq-request-create" class="form-grid"><label>Individual device / accessory<select name="asset_ids" multiple size="5" required>${assets.map(a=>`<option value="${a.id}" ${a.availability!=="Available"||!a.has_photo?"disabled":""}>${esc(a.asset_tag)} · ${esc(a.name)} · ${esc(a.availability)}${!a.has_photo?" · photo required":""}</option>`).join("")}</select><span class="hint">Select main devices; linked accessories are added automatically. Each physical item stays separately tracked.</span></label><label>Borrower name<input name="borrower_name" value="${esc(state.user.full_name)}" required></label><label>Borrower's office<input name="borrower_office" value="Office" required></label><label>Shift for issue<select name="shift_id">${eqOptions(shifts)}</select></label><label>Issue date<input type="date" name="shift_date" value="${eqDate()}" required></label><label>Expected return<input type="datetime-local" name="expected_return_at" value="${eqDateTime()}" required></label><label class="wide">Purpose<textarea name="purpose"></textarea></label><label><input type="checkbox" name="external" value="true"> External office borrower (Head/Editor only)</label><div class="wide"><button class="button primary">Submit request for authorization</button></div></form></div>`;
+      const assetsTable=assets.length?`<div class="table-wrap"><table><thead><tr><th>Asset</th><th>Photo / QR</th><th>Category, brand &amp; model</th><th>Serial / internal tag</th><th>Condition / availability</th><th>Location / responsible</th><th>Accessories</th><th>Actions</th></tr></thead><tbody>${assets.map(a=>`<tr><td><b>${esc(a.asset_tag)}</b><br>${esc(a.name)}</td><td>${a.has_photo?`<img alt="Asset photo" width="52" src="/api/equipment/assets/${a.id}/photo">`:"—"}<br><a href="/api/equipment/assets/${a.id}/qr.svg" target="_blank" rel="noopener">QR label</a></td><td>${esc(a.category)} · ${esc(a.brand)} ${esc(a.model)}</td><td>${esc(a.serial_number||"not recorded")} / ${esc(a.internal_tag||"—")}</td><td>${esc(a.condition)} / ${esc(a.availability)}</td><td>${esc(a.location)} · ${esc(a.responsible_user||a.department||"—")}</td><td>${a.accessories.map(x=>esc(x.asset_tag)+" · "+esc(x.name)).join("<br>")||"—"}</td><td>${canManage?`<button class="button small" data-eq-action="history" data-id="${a.id}">History</button><button class="button small" data-eq-action="edit-asset" data-id="${a.id}">Edit</button><button class="button small" data-eq-action="photo" data-id="${a.id}">Photo</button>${a.availability==="Damaged"?`<button class="button small" data-eq-action="inspect" data-id="${a.id}">Inspect</button>`:""}`:"—"}</td></tr>`).join("")}</tbody></table></div>`:`<div class="empty">No equipment assets registered. Register each physical device separately.</div>`;
+      const requestRows=issues.length ? issues.map(i=>{
+        const authorized=i.authorized_by?`by ${esc(i.authorized_by)} (${esc(i.authorized_role_id)}) at ${esc(i.authorized_at)}`:"pending";
+        const issued=i.issued_by?`${esc(i.issued_by)} at ${esc(i.issued_at)}`:"not issued";
+        const itemRows=i.items.map(x=>`<tr><td>${esc(x.asset_tag)} · ${esc(x.name)}</td><td>${esc(x.condition_before||"—")}</td><td>${esc(x.return_condition||"outstanding")}${x.returned_at ? " · "+esc(x.returned_at) : ""}</td><td>${esc(state.people.find(p=>p.id===x.received_by_id)?.full_name||"—")}</td><td>${x.missing_reported?"Reported missing":"—"}</td></tr>`).join("");
+        const actions=`${i.status==="Pending authorization"&&isRole("head_of_office","editor")?`<button class="button small" data-eq-action="authorize" data-id="${i.id}">Authorize</button>`:""}${i.status==="Authorized"?`<button class="button small primary" data-eq-action="issue" data-id="${i.id}">Record physical issue</button>`:""}${["Issued","Partially returned"].includes(i.status)&&!i.borrower_acknowledged_at?`<button class="button small" data-eq-action="borrower-ack" data-id="${i.id}" data-external="${i.external}">Acknowledge receipt</button>`:""}${["Issued","Partially returned"].includes(i.status)?`<button class="button small" data-eq-action="return" data-id="${i.id}">Record return / missing</button>`:""}`;
+        return `<article class="task-card"><div class="panel-head"><h3>Request #${i.id} · ${esc(i.borrower_name)} · ${esc(i.borrower_office)}</h3><span class="badge">${esc(i.status)}</span></div><p>Authorization: ${esc(i.authorization_method||"pending")} ${authorized}<br>Issued by custodian: ${issued} · Expected back ${esc(i.expected_return_at)} · Outstanding ${i.outstanding_count}</p><div class="table-wrap"><table><thead><tr><th>Asset</th><th>Before</th><th>Return condition/time</th><th>Received by</th><th>Missing</th></tr></thead><tbody>${itemRows}</tbody></table></div><div class="row-actions">${actions}</div></article>`;
+      }).join("") : `<div class="empty">No equipment requests yet.</div>`;
+      const handoverForm=`<div class="panel"><h2>Custody shift handover</h2><form id="eq-handover-create" class="form-grid"><label>Outgoing shift<select name="outgoing_shift_id">${eqOptions(shifts)}</select></label><label>Incoming shift<select name="incoming_shift_id">${eqOptions(shifts)}</select></label><label>Outgoing custodian<select name="outgoing_custodian_id">${state.people.map(p=>`<option value="${p.id}">${esc(p.full_name)}</option>`).join("")}</select></label><label>Incoming custodian<select name="incoming_custodian_id">${state.people.map(p=>`<option value="${p.id}">${esc(p.full_name)}</option>`).join("")}</select></label><label>Date<input type="date" name="shift_date" value="${eqDate()}" required></label><label class="wide">Discrepancies / handover notes<textarea name="discrepancies"></textarea></label><div class="wide"><button class="button">Create handover snapshot</button></div></form><p class="hint">Handover snapshots every outstanding item and never marks anything returned.</p><div id="eq-handovers">${handovers.map(h=>`<article class="task-card"><b>Handover #${h.id}</b> · ${esc(h.outgoing_custodian)} (${esc(h.outgoing_shift)}) → ${esc(h.incoming_custodian)} (${esc(h.incoming_shift)}) · ${esc(h.shift_date)}<p>Outstanding snapshot: ${h.outstanding_items.map(x=>`${esc(x.asset_tag)} → ${esc(x.borrower_name)} (${esc(x.borrower_office)}), due ${esc(x.expected_return_at)}`).join("; ")||"none"}<br>Outgoing acknowledgement: ${esc(h.outgoing_ack_at||"pending")} · incoming: ${esc(h.incoming_ack_at||"pending")}<br>Discrepancies: ${esc(h.discrepancies||"none")}</p><div class="row-actions">${h.outgoing_custodian_id===state.user.id&&!h.outgoing_ack_at?`<button class="button small" data-eq-action="handover-ack" data-id="${h.id}">Outgoing acknowledges</button>`:""}${h.incoming_custodian_id===state.user.id&&!h.incoming_ack_at?`<button class="button small" data-eq-action="handover-ack" data-id="${h.id}">Incoming acknowledges</button>`:""}${isRole("head_of_office")&&!h.reviewed_at&&h.outgoing_ack_at&&h.incoming_ack_at?`<button class="button small" data-eq-action="handover-review" data-id="${h.id}">Head review</button>`:""}</div></article>`).join("")||"<p class=\"hint\">No handovers recorded.</p>"}</div></div>`;
+      const reportPanel=isRole("head_of_office","system_administrator")?`<div class="panel"><h2>Equipment reports &amp; complete asset history</h2><div class="inline-form"><label>Report<select id="eq-report-name"><option value="custodians">Shift custodian accountability</option><option value="issued-by-custodian">Issued by custodian</option><option value="received-by-custodian">Received by custodian</option><option value="currently-borrowed">Currently borrowed</option><option value="external-borrowing">External office borrowing</option><option value="overdue">Overdue by borrower</option><option value="missing">Missing equipment</option><option value="damaged">Damaged / awaiting inspection</option><option value="handovers">Shift handovers</option></select></label><button class="button" data-eq-action="report">Load report</button></div><pre id="eq-report-output" class="hint"></pre></div>`:"";
+      root.innerHTML=`<div class="page-heading"><div><h1>Equipment &amp; shift custody</h1><p>Inventory and accountability from the live application database · ${esc(d.date)}</p></div></div><div class="grid">${cards.map(([n,v])=>`<div class="card stat"><div class="label">${esc(n)}</div><div class="value" style="font-size:1.05rem">${esc(v)}</div></div>`).join("")}</div>${assetForm}${custodyPanel}<div class="panel"><h2>Individual asset register</h2>${assetsTable}</div>${issueForm}<div class="panel"><h2>Requests and current loans</h2>${requestRows}</div>${handoverForm}${reportPanel}`;
+    } catch(e) { root.innerHTML=`<div class="message error">${esc(e.message)}</div>`; }
+  }
+
   async function loadAudit() {
     const root=$("#view-audit"); root.innerHTML=`<div class="page-heading"><div><h1>Audit history</h1><p>Recent recorded changes and access events.</p></div></div>`;
     try {const rows=await api("/api/audit?limit=200"); root.innerHTML+=`<div class="panel table-wrap"><table><thead><tr><th>Time</th><th>Actor ID</th><th>Action</th><th>Record</th><th>Details</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${esc(r.created_at.replace("T"," "))}</td><td>${esc(r.actor_id)}</td><td>${esc(r.action)}</td><td>${esc(r.entity_type)} #${esc(r.entity_id)}</td><td>${esc(JSON.stringify(r.details))}</td></tr>`).join("")}</tbody></table></div>`;}
@@ -170,7 +218,7 @@
     state.activeView=name;
     $$(".view").forEach(v=>v.hidden=v.id!==`view-${name}`);
     $$(".nav-button").forEach(b=>b.classList.toggle("active",b.dataset.view===name));
-    const loaders={dashboard:loadDashboard,tasks:loadTasks,timetable:loadTimetable,reports:loadReports,analytics:loadAnalytics,accounts:loadAccounts,audit:loadAudit};
+    const loaders={dashboard:loadDashboard,tasks:loadTasks,timetable:loadTimetable,reports:loadReports,analytics:loadAnalytics,equipment:loadEquipment,accounts:loadAccounts,audit:loadAudit};
     if (loaders[name]) await loaders[name]();
   }
   async function loadSubmissions(taskId) {
@@ -237,6 +285,90 @@
       if(form.id==="login-form"){const error=$("#login-error");error.textContent=e.message;error.hidden=false;} else message(e.message,"error");
     }
   });
+  document.addEventListener("click", async event=>{
+    const b=event.target.closest("[data-eq-action]"); if(!b)return;
+    const id=Number(b.dataset.id);
+    try {
+      if(b.dataset.eqAction==="authorize") {
+        const method=prompt("Authorization method: Head of Office authorization, Editor authorization, or Other delegated authorization","Head of Office authorization"); if(!method)return;
+        const remarks=prompt("Authorization remarks (required; include delegation details if applicable):"); if(!remarks||remarks.trim().length<3)return;
+        await api(`/api/equipment/requests/${id}/authorize`,{method:"POST",body:{method,remarks}});
+      } else if(b.dataset.eqAction==="issue") {
+        const req=state.equipmentIssues.find(x=>x.id===id); if(!req)return;
+        const conditions={}; for(const item of req.items){const value=prompt(`Physical condition before issue for ${item.asset_tag} (${item.name})`,"Good");if(!value)return;conditions[item.asset_id]=value;}
+        await api(`/api/equipment/requests/${id}/issue`,{method:"POST",body:{conditions}});
+      } else if(b.dataset.eqAction==="borrower-ack") {
+        let body={acknowledged:true}; if(b.dataset.external==="true"){const name=prompt("Confirm the external borrower’s full name as shown on the request:");if(!name)return;body.borrower_name=name;}
+        await api(`/api/equipment/requests/${id}/acknowledge`,{method:"POST",body});
+      } else if(b.dataset.eqAction==="return") {
+        const req=state.equipmentIssues.find(x=>x.id===id); if(!req)return;
+        const outstanding=req.items.filter(x=>!x.returned_at);
+        const valid=outstanding.map(x=>`${x.asset_id}=${x.asset_tag}`).join(", ");
+        const returnedText=prompt(`Enter asset IDs physically received, comma separated. Outstanding: ${valid}. Leave blank if none.`,""); if(returnedText===null)return;
+        const missingText=prompt("Enter outstanding asset IDs reported missing, comma separated (do not list physically returned items):",""); if(missingText===null)return;
+        const returned=returnedText.split(",").map(x=>x.trim()).filter(Boolean).map(raw=>{const assetId=Number(raw);const item=outstanding.find(x=>x.asset_id===assetId);if(!item)throw new Error(`Asset ${raw} is not outstanding on this request`);const condition=prompt(`Condition after return for ${item.asset_tag}: New, Good, Fair, Poor or Damaged`,"Good");if(!condition)throw new Error("Return condition is required");const damage_notes=prompt(`Damage report for ${item.asset_tag} (leave blank if none):`,"")||"";return {asset_id:assetId,condition,damage_notes};});
+        const missing_asset_ids=missingText.split(",").map(x=>x.trim()).filter(Boolean).map(Number);
+        const shiftId=Number(prompt(`Receiving custodian’s shift ID (${state.equipmentShifts.map(s=>`${s.id} ${s.name}`).join("; ")})`,String(req.shift_id))); if(!shiftId)return;
+        const shiftDate=prompt("Actual date received/reported (YYYY-MM-DD):",today());if(!shiftDate)return;
+        const notes=prompt("Return / discrepancy notes:","")||"";
+        await api(`/api/equipment/requests/${id}/return`,{method:"POST",body:{shift_id:shiftId,shift_date:shiftDate,returned,missing_asset_ids,notes}});
+      } else if(b.dataset.eqAction==="history") {
+        const data=await api(`/api/equipment/reports/assets/${id}/history`); const pre=$("#eq-report-output"); if(pre)pre.textContent=JSON.stringify(data,null,2); message("Asset history loaded in the report panel.","success"); return;
+      } else if(b.dataset.eqAction==="report") {
+        const name=$("#eq-report-name")?.value; const data=await api(`/api/equipment/reports/${name}`); $("#eq-report-output").textContent=JSON.stringify(data,null,2); return;
+      } else if(b.dataset.eqAction==="handover-ack") {
+        const discrepancies=prompt("Handover discrepancy or acknowledgement note (optional):","")||"";
+        await api(`/api/equipment/handovers/${id}/acknowledge`,{method:"POST",body:{discrepancies}});
+      } else if(b.dataset.eqAction==="handover-review") {
+        const comment=prompt("Head of Office review comment:","")||"";
+        await api(`/api/equipment/handovers/${id}/review`,{method:"POST",body:{comment}});
+      } else if(b.dataset.eqAction==="edit-asset") {
+        const asset=state.equipmentAssets.find(x=>x.id===id); if(!asset)return;
+        const category=prompt("Category:",asset.category);if(category===null)return;
+        const name=prompt("Equipment name:",asset.name);if(name===null)return;
+        const model=prompt("Exact model:",asset.model);if(model===null)return;
+        const serial_number=prompt("Manufacturer serial number (leave blank if unknown):",asset.serial_number||"");if(serial_number===null)return;
+        const location=prompt("Current location:",asset.location);if(location===null)return;
+        const condition=prompt("Condition (New, Good, Fair, Poor, Damaged):",asset.condition);if(condition===null)return;
+        const responsible=prompt(`Responsible user ID, or blank for none (${state.people.map(p=>`${p.id}=${p.full_name}`).join("; ")})`,asset.responsible_user_id||"");if(responsible===null)return;
+        const notes=prompt("Notes:",asset.notes||"");if(notes===null)return;
+        await api(`/api/equipment/assets/${id}`,{method:"PATCH",body:{category,name,model,serial_number,location,condition,responsible_user_id:responsible?Number(responsible):null,notes}});
+      } else if(b.dataset.eqAction==="inspect") {
+        const condition=prompt("Inspection condition (New, Good, Fair, Poor, Damaged):","Good");if(!condition)return;
+        const disposition=prompt("Disposition after inspection (Available, Maintenance, Damaged, Retired):","Available");if(!disposition)return;
+        const notes=prompt("Inspection findings (required):");if(!notes)return;
+        await api(`/api/equipment/assets/${id}/inspect`,{method:"POST",body:{condition,disposition,notes}});
+      } else if(b.dataset.eqAction==="photo") {
+        const input=document.createElement("input");input.type="file";input.accept="image/png,image/jpeg";
+        await new Promise(resolve=>{input.onchange=async()=>{if(!input.files[0])return resolve();const fd=new FormData();fd.append("file",input.files[0]);try{await api(`/api/equipment/assets/${id}/photo`,{method:"POST",body:fd});resolve();}catch(e){message(e.message,"error");resolve();}};input.click();});
+      }
+      message("Equipment action recorded.","success"); await loadEquipment();
+    } catch(e){message(e.message,"error");}
+  });
+  document.addEventListener("submit", async event=>{
+    const form=event.target; if(!form.id?.startsWith("eq-"))return; event.preventDefault(); const fd=new FormData(form);
+    try {
+      if(form.id==="eq-asset-create") {
+        const body={asset_tag:fd.get("asset_tag"),category:fd.get("category"),name:fd.get("name"),brand:fd.get("brand"),model:fd.get("model"),serial_number:fd.get("serial_number")||null,internal_tag:fd.get("internal_tag"),location:fd.get("location"),condition:fd.get("condition"),purchase_date:fd.get("purchase_date")||null,warranty_until:fd.get("warranty_until")||null,department_id:fd.get("department_id")?Number(fd.get("department_id")):null,responsible_user_id:fd.get("responsible_user_id")?Number(fd.get("responsible_user_id")):null,notes:fd.get("notes")};
+        await api("/api/equipment/assets",{method:"POST",body});
+      } else if(form.id==="eq-accessory-link") {
+        await api(`/api/equipment/assets/${fd.get("parent_asset_id")}/accessories`,{method:"POST",body:{accessory_asset_id:Number(fd.get("accessory_asset_id"))}});
+      } else if(form.id==="eq-custodian-assign") {
+        await api("/api/equipment/custodians",{method:"POST",body:{shift_id:Number(fd.get("shift_id")),custodian_id:Number(fd.get("custodian_id")),effective_from:fd.get("effective_from"),effective_to:fd.get("effective_to")||null,reason:fd.get("reason")}});
+      } else if(form.id==="eq-custodian-replace") {
+        await api("/api/equipment/custodians/replacements",{method:"POST",body:{shift_id:Number(fd.get("shift_id")),shift_date:fd.get("shift_date"),original_custodian_id:Number(fd.get("original_custodian_id")),replacement_custodian_id:Number(fd.get("replacement_custodian_id")),reason:fd.get("reason")}});
+      } else if(form.id==="eq-auth-roles") {
+        await api("/api/equipment/authorization-roles",{method:"PUT",body:{roles:$$('select[name="roles"] option:checked',form).map(o=>o.value)}});
+      } else if(form.id==="eq-request-create") {
+        const external=fd.get("external")==="true";const body={asset_ids:$$('select[name="asset_ids"] option:checked',form).map(o=>Number(o.value)),borrower_name:fd.get("borrower_name"),borrower_office:fd.get("borrower_office"),external,shift_id:Number(fd.get("shift_id")),shift_date:fd.get("shift_date"),expected_return_at:new Date(fd.get("expected_return_at")).toISOString(),purpose:fd.get("purpose")};
+        await api("/api/equipment/requests",{method:"POST",body});
+      } else if(form.id==="eq-handover-create") {
+        await api("/api/equipment/handovers",{method:"POST",body:{outgoing_shift_id:Number(fd.get("outgoing_shift_id")),incoming_shift_id:Number(fd.get("incoming_shift_id")),shift_date:fd.get("shift_date"),outgoing_custodian_id:Number(fd.get("outgoing_custodian_id")),incoming_custodian_id:Number(fd.get("incoming_custodian_id")),discrepancies:fd.get("discrepancies")}});
+      }
+      message("Equipment record saved.","success"); await loadEquipment();
+    } catch(e){message(e.message,"error");}
+  });
+
   $("#password-button").addEventListener("click",async()=>{const current_password=prompt("Current password:");if(!current_password)return;const new_password=prompt("New password (at least 12 characters):");if(!new_password)return;try{await api("/api/auth/change-password",{method:"POST",body:new URLSearchParams({current_password,new_password})});message("Password changed. Sign in again.","success");showLogin();}catch(e){message(e.message,"error");}});
   $("#logout-button").addEventListener("click",async()=>{try{await api("/api/auth/logout",{method:"POST"});}catch(_){}showLogin();});
   api("/api/auth/me").then(startSession).catch(()=>showLogin());
