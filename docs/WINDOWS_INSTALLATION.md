@@ -70,3 +70,32 @@ Before a code update, create and verify a paired backup, ensure an off-host copy
 - **Client blocked:** validate the correct server IPv4/subnet and Windows network profile; keep the rule subnet-restricted.
 - **Login fails after changing secret:** `SECRET_KEY` change invalidates existing signed sessions; sign in again. Do not rotate DB credentials without updating all Compose environment settings in the same maintenance window.
 - **Restore required:** use the tested procedure in `BACKUP_RECOVERY.md` and verify both health endpoints before allowing staff back in.
+
+## 8. Setup on the other six office computers (no app install)
+
+The six client computers do **not** need Python, Docker, PostgreSQL or a downloaded application. They use a supported, updated browser over the same trusted office Wi-Fi/LAN.
+
+On **each of the six** computers:
+
+1. Connect to the approved office Wi-Fi/VLAN. Do not use guest Wi-Fi if it is isolated from the server, and do not connect through a public network/VPN unless IT has approved the route.
+2. In a browser, enter the same server URL: `https://<office-server-name-or-reserved-IP>/` once IT has configured trusted HTTPS. During an isolated test only, the current unencrypted app is at `http://<reserved-server-ip>:8000/`; never enter real passwords over HTTP on an untrusted network.
+3. If IT configured a private certificate authority, have IT install/trust its certificate using the organization's managed device policy. Do not click through certificate warnings or install a certificate file from an unverified source.
+4. Bookmark the approved internal URL. Confirm the institutional emblem and TBC Digital logo display.
+5. Sign in with that person's individual username/password. The administrator creates accounts on the server; do not share credentials or use the system administrator account for daily work.
+6. Verify the role-appropriate pages (employee tasks/timetable; editor assignment/review; planner draft; head approvals/reports; shift leader handover; admin setup). Sign out on a shared computer.
+7. Ask IT to test an unauthorized subnet and confirm the app is blocked there. Do not open PostgreSQL port 5432 or add router port forwarding.
+
+The office URL and accounts are the same across all six clients; database and uploads remain on the Windows server. Client-side caches must not be used for confidential documents.
+
+## 9. Final installation checklist
+
+- [ ] Windows 11 server reserved/static IP and approved trusted LAN.
+- [ ] Docker Desktop starts and Compose reports healthy services after a Windows restart/login.
+- [ ] `.env` contains generated unique secrets and has restricted ACLs.
+- [ ] `docker compose exec -T web python -m app.cli init-db` succeeds; `/api/health/ready` returns 200.
+- [ ] No host-published PostgreSQL port; firewall allows only the office subnet.
+- [ ] Trusted HTTPS configured and verified on all seven computers before entering actual credentials/data.
+- [ ] One individual account for each person, correct role and department, no shared daily-admin login.
+- [ ] Planner/head/editor/staff workflows checked with test records.
+- [ ] Daily paired database/uploads backup verified and copied off-host.
+- [ ] Restore drill passed; application/data reopened and sample attachment retrieved.
