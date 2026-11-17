@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -340,3 +340,78 @@ class EquipmentHandoverLine(Base):
     issue_item_id: Mapped[int] = mapped_column(ForeignKey("equipment_issue_items.id"), nullable=False)
     asset_id: Mapped[int] = mapped_column(ForeignKey("equipment_assets.id"), nullable=False)
     asset_tag_snapshot: Mapped[str] = mapped_column(String(50), nullable=False)
+
+
+class SocialAccount(Base):
+    """One verified office profile per supported platform; never stores login credentials."""
+    __tablename__ = "social_accounts"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    platform: Mapped[str] = mapped_column(String(20), unique=True, index=True, nullable=False)
+    account_name: Mapped[str | None] = mapped_column(String(160))
+    account_handle: Mapped[str | None] = mapped_column(String(160))
+    profile_url: Mapped[str | None] = mapped_column(String(500))
+    configured_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    configured_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+
+
+class SocialOfficer(Base):
+    __tablename__ = "social_officers"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True, index=True, nullable=False)
+    designated_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    designated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+
+
+class SocialWeeklyReport(Base):
+    __tablename__ = "social_weekly_reports"
+    __table_args__ = (UniqueConstraint("account_id", "reporting_week", name="uq_social_account_week"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("social_accounts.id"), index=True, nullable=False)
+    platform: Mapped[str] = mapped_column(String(20), index=True, nullable=False)
+    account_name_snapshot: Mapped[str] = mapped_column(String(160), nullable=False)
+    account_handle_snapshot: Mapped[str] = mapped_column(String(160), nullable=False)
+    reporting_date: Mapped[date] = mapped_column(Date, index=True, nullable=False)
+    reporting_week: Mapped[date] = mapped_column(Date, index=True, nullable=False)
+    metrics: Mapped[dict] = mapped_column(JSON, nullable=False)
+    best_content: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    recommendations: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="Draft", index=True, nullable=False)
+    source_kind: Mapped[str] = mapped_column(String(20), default="manual", nullable=False)
+    entered_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    entered_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime)
+    reviewed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    review_comment: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+
+
+class SocialEvidence(Base):
+    __tablename__ = "social_evidence"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    report_id: Mapped[int] = mapped_column(ForeignKey("social_weekly_reports.id", ondelete="CASCADE"), index=True, nullable=False)
+    original_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    stored_name: Mapped[str] = mapped_column(String(100), index=True, nullable=False)
+    media_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    uploaded_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+
+
+class SocialQuarterlyReport(Base):
+    __tablename__ = "social_quarterly_reports"
+    __table_args__ = (UniqueConstraint("report_year", "quarter", name="uq_social_year_quarter"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    report_year: Mapped[int] = mapped_column(Integer, nullable=False)
+    quarter: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="Draft", index=True, nullable=False)
+    snapshot: Mapped[dict] = mapped_column(JSON, nullable=False)
+    management_notes: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    generated_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    generated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime)
+    reviewed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    review_comment: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)

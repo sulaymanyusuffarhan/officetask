@@ -17,6 +17,7 @@ Implementation exists for the following workflows, but passing a unit test or ha
 | 11 | Windows installer/start/stop/firewall/backup/restore/scheduled-task scripts | Scripts provided; not executed on Windows 11 in this environment |
 | 12 | Full PostgreSQL/Windows/seven-device acceptance and operational documentation | Incomplete; unit/API tests run, but production and concurrent-user acceptance still required |
 | 13 | Individual equipment register, shift custodians/replacements, role-based authorization, issue/partial-return/handover, audit/reports | Implemented with Alembic schema and real-record API tests; browser and Windows/PostgreSQL acceptance still required |
+| 14 | TBC Digital manual-first social media reporting for five platforms, evidence, import, approvals, quarterly consolidation, charts and exports | Implemented with Alembic schema, SQLite API workflow tests and Node SVG-renderer tests; actual verified profiles/figures, production browser, PostgreSQL and Windows acceptance pending |
 
 ## Remaining go-live blockers
 
