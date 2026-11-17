@@ -17,16 +17,19 @@ The current HTTP Compose endpoint needs an organization-approved TLS reverse pro
 
 - `app/api/routes.py`: role-guarded auth, administration, timetable/task, attachment, shift report, attendance and reporting routes.
 - `app/api/export_routes.py`, `analytics.py`: PDF/Excel and aggregated management reports.
+- `app/api/equipment.py`, `app/schemas_equipment.py`: role-enforced equipment register, authorizations, shift custody, issues/returns, handovers, QR labels and audit/report endpoints.
 - `app/core`: configuration, session-derived current user, CSRF and role policy, Argon2 password hashing.
 - `app/db`, `app/models`: SQLAlchemy 2 sessions and normalized domain entities.
 - `alembic/versions`: reviewed database schema versions.
 - `app/templates`, `app/static`: server page shell, responsive local CSS/JS, official supplied assets.
-- `storage/uploads`: private random-name document store; not mounted as a static web directory.
+- `storage/uploads`: private random-name task evidence and equipment-photo store; neither is mounted as a static web directory.
 - `scripts/`, root `.bat`: Windows setup, run/stop, backup/restore and scheduled-task helpers.
 
 ## Persistence and workflow invariants
 
-Normalized PostgreSQL entities cover users/roles, departments/shifts, weekly timetable versions and assignments, tasks, status history, submissions, private attachment metadata, verifications, attendance exceptions, handover reports and audit logs. Each employee on a shared piece of work has an independent task row. Timetable versions use `(week_start, version)` uniqueness; week allocations must fall inside the seven-day week and the server rejects overlapping shifts. Published plans are locked; revisions require a cloned version and recorded reason. State transitions and reviewer identity are audited.
+Normalized PostgreSQL entities cover users/roles, departments/shifts, weekly timetable versions and assignments, tasks, status history, submissions, private attachment metadata, verifications, attendance exceptions, handover reports, and equipment assets/accessories, dated custodian assignments/replacements, authorization policy, issue/item rows, immutable item events and handover snapshots. Each employee on a shared piece of work has an independent task row. Timetable versions use `(week_start, version)` uniqueness; week allocations must fall inside the seven-day week and the server rejects overlapping shifts. Published plans are locked; revisions require a cloned version and recorded reason. State transitions and reviewer identity are audited.
+
+Equipment requests stay pending until an authorizer whose role is configured by the Head records a method, remarks and timestamp. Issue/return routes separately verify the actual actor against the dated shift custodian/replacement roster; authorization never implies the authorizer physically issued an item. Each physical device/accessory has its own unique asset row and issue item. A shift handover snapshots all live loans and acknowledgements, but does not close or return them. Partial returns leave unreceived assets outstanding; missing assets stay unavailable; damaged assets require an explicit inspection disposition. App routes do not delete completed equipment events.
 
 A submission is not a verified result. Only the assigning editor or Head may verify/reject/request correction, and nobody may verify their own task. Reported submission and verified rates use separate numerators/denominator. Attendance exceptions (leave, absent, reassigned) are shown separately rather than turning a missing submission into an automatic performance failure.
 

@@ -28,9 +28,11 @@ def seed() -> None:
                 db.add(Role(id=role_id, name=name))
         if not db.scalar(select(Department).limit(1)):
             db.add(Department(name="General"))
-        if not db.scalar(select(Shift).limit(1)):
-            db.add(Shift(name="Morning", start_time="08:00", end_time="16:00"))
-            db.add(Shift(name="Evening", start_time="16:00", end_time="23:00"))
+        default_shifts = (("Morning", "06:00", "14:00"), ("Afternoon", "14:00", "18:00"), ("Evening", "18:00", "23:59"))
+        existing_shifts = {s.name for s in db.scalars(select(Shift)).all()}
+        for name, start_time, end_time in default_shifts:
+            if name not in existing_shifts:
+                db.add(Shift(name=name, start_time=start_time, end_time=end_time))
         db.commit()
 
 

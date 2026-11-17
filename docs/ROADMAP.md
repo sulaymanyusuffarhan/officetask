@@ -16,6 +16,7 @@ Implementation exists for the following workflows, but passing a unit test or ha
 | 10 | Audit history and paired DB/uploads backup/restore utilities | Code implemented; Windows restore drill/off-host backup integration pending |
 | 11 | Windows installer/start/stop/firewall/backup/restore/scheduled-task scripts | Scripts provided; not executed on Windows 11 in this environment |
 | 12 | Full PostgreSQL/Windows/seven-device acceptance and operational documentation | Incomplete; unit/API tests run, but production and concurrent-user acceptance still required |
+| 13 | Individual equipment register, shift custodians/replacements, role-based authorization, issue/partial-return/handover, audit/reports | Implemented with Alembic schema and real-record API tests; browser and Windows/PostgreSQL acceptance still required |
 
 ## Remaining go-live blockers
 

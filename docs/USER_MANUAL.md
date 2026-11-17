@@ -40,6 +40,21 @@ The interface has Overview, Tasks, Weekly timetable, Shift reports and (for the 
 
 - Review today's assigned team tasks and overdue work, then submit a shift handover report with unfinished items, challenges, attendance notes and handover.
 
+## Equipment & shift custody
+
+The shared **Equipment & custody** page works with database-backed assets and issue transactions; it is available to all signed-in roles while backend permissions govern each operation.
+
+- Head/System Administrator: register each device/accessory separately under a unique asset number, add a private PNG/JPEG photo, print its QR label, link accessories, correct asset details, assign dated shift custodians/replacements, and record post-return inspection. Never merge several physical units into a quantity-only record or invent a serial number.
+- Head of Office: configure permitted authorization roles before any borrowing. A blank policy blocks approvals. Keep this role distinct from the person physically handing an item over.
+- Requester: select device(s), request shift/date, borrower/office, purpose and due time. Linked accessories are automatically added as separate item lines. External office requests are limited to Head/Editor users.
+- Configured authorizer: record the authorization method and remarks. The actual scheduled custodian/replacement then records each pre-issue condition and issues the items; non-custodians and unauthorized requests are rejected server-side.
+- Internal borrower: sign in as the named borrower and acknowledge receipt. For external borrowing, the shift custodian records the borrower's matching name/acknowledgement.
+- At shift change, outgoing and incoming custodians each acknowledge a handover snapshot of outstanding issue items. Record discrepancies. This never marks any borrowed device returned.
+- Receiving custodian: choose their receiving shift/date, list the items physically returned with condition/damage, and separately report missing items. Partial returns are supported; unreturned/missing items remain open. Damaged items remain unavailable until inspected and given an explicit disposition.
+- Head/System Administrator reports show assignments/replacements, issues/returns by custodian, current/external/overdue borrowing, missing/damaged assets and handover history. Head/System Administrator can open each asset's full event and record-change history.
+
+Do not perform database edits to “fix” a loan. Use the application workflow so actor identity, timestamps and audit history are retained. See [Equipment & shift custody](EQUIPMENT_MANAGEMENT.md) for the end-to-end acceptance procedure.
+
 ## System administrator
 
 - Use Accounts & setup to create/deactivate accounts, reset passwords, and add departments/shifts. Protect initial passwords and the `.env` file.

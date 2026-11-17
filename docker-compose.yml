@@ -27,6 +27,7 @@ services:
       APP_NAME: ${APP_NAME:-Office Task & Performance Management System}
       SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
       SESSION_MAX_AGE_SECONDS: ${SESSION_MAX_AGE_SECONDS:-28800}
+      OFFICE_TIMEZONE: ${OFFICE_TIMEZONE:-Africa/Dar_es_Salaam}
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-officetask}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-officetask}
       UPLOAD_DIR: /srv/officetask/storage/uploads
       MAX_UPLOAD_SIZE_MB: ${MAX_UPLOAD_SIZE_MB:-20}
