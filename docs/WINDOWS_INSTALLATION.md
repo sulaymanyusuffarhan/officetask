@@ -72,7 +72,7 @@ Before a code update, create and verify a paired backup, ensure an off-host copy
 - **Address/port in use:** edit `APP_PORT` and firewall rule consistently, then run `docker compose up -d`.
 - **Client blocked:** validate the correct server IPv4/subnet and Windows network profile; keep the rule subnet-restricted.
 - **Login fails after changing secret:** `SECRET_KEY` change invalidates existing signed sessions; sign in again. Do not rotate DB credentials without updating all Compose environment settings in the same maintenance window.
-- **Restore required:** use the tested procedure in `BACKUP_RECOVERY.md` and verify both health endpoints before allowing staff back in.
+- **Restore required:** follow the documented procedure in `BACKUP_RECOVERY.md` only after your IT administrator has completed a restore drill on a disposable deployment. Verify both health endpoints and a representative attachment before allowing staff back in.
 
 ## 8. Setup on the other six office computers (no app install)
 
