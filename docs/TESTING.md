@@ -10,7 +10,7 @@ python -m pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
-The tests use an isolated file-backed SQLite database per test (with SQLite foreign keys enabled) and exercise authentication, Argon2 login, CSRF rejection, the six-role API access matrix, planner-to-head timetable approval/publication/versioning, task assignment/submission/verification, performance/analytics and PDF/XLSX exports, file upload validation/private download, audit access and throttling, and seven independent in-process sessions reading concurrently.
+The tests use an isolated file-backed SQLite database per test (with SQLite foreign keys enabled) and exercise authentication, Argon2 login, CSRF rejection, representative allowed/denied API access for all six roles, planner-to-head timetable approval/publication/versioning, task assignment/submission/verification, performance/analytics and PDF/XLSX exports, file upload validation/private download, audit access and throttling, and seven independent in-process sessions reading concurrently. Role checks are representative rather than exhaustive for every route; the concurrent-session test uses SQLite and performs reads, not PostgreSQL write-load testing.
 
 `tests/test_equipment.py` covers unique physical asset registration (including optional serials), accessory linking and automatic issue-line expansion, configured authorizer roles, denial of issue before authorization, actual custodian validation, distinct authorizer/issuer/borrower/receiver IDs, borrower acknowledgement, morning-to-evening shift handover with both acknowledgements, and the required partial-return/missing-charger scenario with asset history and report verification. The handover test asserts an open equipment loan remains open across the shift change. This is database-backed API coverage, not a browser or network-load test.
 
@@ -45,6 +45,20 @@ Invoke-WebRequest http://localhost:8000/api/health/ready
 ```
 
 Verify TCP 5432 is not bound on the Windows host. Test allowed/denied client subnet access, sign-in/session expiration, role boundaries and access to private attachments. Restore a paired DB/files backup into a test environment, verify hashes and at least one downloaded attachment.
+
+## Audit evidence
+
+See [`AUDIT_REPORT.md`](AUDIT_REPORT.md) for the dated execution results, PASS/FAIL/NOT TESTED/BLOCKED status table, deployment blockers and go-live decision. On the audit branch, the local checks were run with:
+
+```bash
+.venv/bin/pytest -q
+node --check app/static/js/app.js
+.venv/bin/python -m compileall -q app alembic tests
+.venv/bin/alembic heads
+.venv/bin/alembic upgrade head --sql
+```
+
+Offline migration SQL generation does not apply the migrations to PostgreSQL.
 
 ## Not tested here
 
