@@ -13,7 +13,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import get_settings
@@ -76,23 +76,32 @@ def issue_login_csrf(request: Request):
 
 
 @router.post("/auth/login")
-def login(request: Request, username: Annotated[str, Form()], password: Annotated[str, Form()], db: Session = Depends(get_db)):
+def login(request: Request, username: Annotated[str, Form(max_length=80)], password: Annotated[str, Form(max_length=256)], db: Session = Depends(get_db)):
     peer, now = (request.client.host if request.client else "unknown"), monotonic()
+    account_key = "account:" + username.strip().lower()[:80]
+    ip_key = "ip:" + peer
     with _login_lock:
-        attempts = _login_failures[peer]
-        while attempts and now - attempts[0] > 900:
-            attempts.popleft()
-        if len(attempts) >= 5:
+        for key in (account_key, ip_key):
+            attempts = _login_failures[key]
+            while attempts and now - attempts[0] > 900:
+                attempts.popleft()
+        if len(_login_failures[account_key]) >= 5 or len(_login_failures[ip_key]) >= 40:
             raise HTTPException(429, "Too many failed sign-in attempts; try later")
     user = db.scalar(select(User).where(func.lower(User.username) == username.strip().lower()))
-    if not user or not user.active or not verify_password(password, user.password_hash):
+    valid = verify_password(password, user.password_hash) if user else False
+    if not user:
+        from app.core.security import DUMMY_PASSWORD_HASH
+        verify_password(password, DUMMY_PASSWORD_HASH)
+    if not user or not user.active or not valid:
         with _login_lock:
-            _login_failures[peer].append(now)
+            _login_failures[account_key].append(now)
+            _login_failures[ip_key].append(now)
         record_audit(db, None, "login_failed", "authentication", "anonymous", {"username": username.strip()[:80], "source": peer})
         db.commit()
         raise HTTPException(401, "Invalid username or password")
     with _login_lock:
-        _login_failures.pop(peer, None)
+        _login_failures.pop(account_key, None)
+        _login_failures.pop(ip_key, None)
     request.session.clear()
     request.session["user_id"] = user.id
     request.session["csrf_token"] = secrets.token_urlsafe(32)
@@ -116,7 +125,7 @@ def logout(request: Request, actor: User = Depends(current_user), db: Session = 
 
 
 @router.post("/auth/change-password")
-def change_password(request: Request, current_password: str = Form(), new_password: str = Form(),
+def change_password(request: Request, current_password: str = Form(max_length=256), new_password: str = Form(max_length=256),
                     db: Session = Depends(get_db), actor: User = Depends(current_user)):
     if len(new_password) < 12:
         raise HTTPException(422, "New password must contain at least 12 characters")
@@ -175,6 +184,12 @@ def set_user_active(user_id: int, active: bool, db: Session = Depends(get_db), a
     user = db.get(User, user_id)
     if not user:
         raise HTTPException(404, "User not found")
+    if not active and user.active and user.role_id == ADMIN:
+        active_admins = db.scalar(select(func.count(User.id)).where(User.active.is_(True), User.role_id == ADMIN)) or 0
+        if active_admins <= 1:
+            raise HTTPException(409, "Cannot disable the last active system administrator")
+    if user.id == actor.id and not active:
+        raise HTTPException(409, "You cannot disable your own administrator account")
     user.active = active
     audit_commit(db, actor, "user_active_changed", "user", user.id, {"active": active})
     return user_json(user)
@@ -185,16 +200,24 @@ def update_user(user_id: int, body: UserUpdate, db: Session = Depends(get_db), a
     target = db.get(User, user_id)
     if not target:
         raise HTTPException(404, "User not found")
-    if target.id == actor.id and body.active is False:
+    final_role = body.role_id if body.role_id is not None else target.role_id
+    final_active = body.active if body.active is not None else target.active
+    if target.id == actor.id and final_active is False:
         raise HTTPException(409, "You cannot disable your own administrator account")
+    if target.role_id == ADMIN and target.active and (final_role != ADMIN or not final_active):
+        active_admins = db.scalar(select(func.count(User.id)).where(User.active.is_(True), User.role_id == ADMIN)) or 0
+        if active_admins <= 1:
+            raise HTTPException(409, "Cannot remove the last active system administrator")
     changes = {}
     for field in ("full_name", "role_id", "department_id", "active"):
+        if field not in body.model_fields_set:
+            continue
         value = getattr(body, field)
-        if value is None:
+        if value is None and field != "department_id":
             continue
         if field == "role_id" and not db.get(Role, value):
             raise HTTPException(422, "Unknown role")
-        if field == "department_id" and not db.get(Department, value):
+        if field == "department_id" and value is not None and not db.get(Department, value):
             raise HTTPException(422, "Unknown department")
         old = getattr(target, field)
         if old != value:
@@ -207,7 +230,7 @@ def update_user(user_id: int, body: UserUpdate, db: Session = Depends(get_db), a
 
 
 @router.post("/users/{user_id}/reset-password")
-def reset_user_password(user_id: int, password: str = Form(min_length=12), db: Session = Depends(get_db), actor: User = Depends(require_roles(ADMIN))):
+def reset_user_password(user_id: int, password: str = Form(min_length=12, max_length=256), db: Session = Depends(get_db), actor: User = Depends(require_roles(ADMIN))):
     target = db.get(User, user_id)
     if not target:
         raise HTTPException(404, "User not found")
@@ -305,12 +328,21 @@ def list_timetables(week_start: date | None = None, db: Session = Depends(get_db
     return result
 
 
-def check_assignment_conflict(item: Timetable, body: AssignmentCreate, shift: Shift, skip_id: int | None = None):
+def check_assignment_conflict(db: Session, item: Timetable, body: AssignmentCreate, shift: Shift, skip_id: int | None = None):
     new_people = {body.employee_id, body.leader_id, body.editor_id} - {None}
-    for old in item.assignments:
-        if old.id == skip_id or old.work_date != body.work_date:
+    # Serialize same-person/day changes on PostgreSQL. The second transaction then
+    # queries the winner's committed allocation instead of passing a check/write race.
+    if db.bind and db.bind.dialect.name == "postgresql":
+        for person_id in sorted(new_people):
+            db.execute(text("SELECT pg_advisory_xact_lock(:day_key, :person_id)"),
+                       {"day_key": body.work_date.toordinal(), "person_id": person_id})
+    existing = db.scalars(select(TimetableAssignment).where(
+        TimetableAssignment.timetable_id == item.id,
+        TimetableAssignment.work_date == body.work_date)).all()
+    for old in existing:
+        if old.id == skip_id:
             continue
-        old_shift = old.shift
+        old_shift = old.shift or db.get(Shift, old.shift_id)
         if shift.start_time < old_shift.end_time and old_shift.start_time < shift.end_time:
             if new_people.intersection({old.employee_id, old.leader_id, old.editor_id} - {None}):
                 raise HTTPException(409, "Employee has an overlapping assignment on this date")
@@ -326,7 +358,14 @@ def validate_assignment(db: Session, item: Timetable, body: AssignmentCreate, sk
     people = db.scalars(select(User).where(User.id.in_(people_ids), User.active.is_(True))).all()
     if len(people) != len(people_ids):
         raise HTTPException(422, "Selected employee, leader or editor is not active")
-    check_assignment_conflict(item, body, shift, skip_id)
+    people_by_id = {person.id: person for person in people}
+    if people_by_id[body.employee_id].role_id not in {HEAD, EDITOR, SHIFT_LEADER, STAFF}:
+        raise HTTPException(422, "The assigned employee must have a business staff role")
+    if body.leader_id and people_by_id[body.leader_id].role_id != SHIFT_LEADER:
+        raise HTTPException(422, "Selected leader must have the Shift Leader role")
+    if body.editor_id and people_by_id[body.editor_id].role_id not in {HEAD, EDITOR}:
+        raise HTTPException(422, "Selected editor must have the Editor or Head of Office role")
+    check_assignment_conflict(db, item, body, shift, skip_id)
     return shift
 
 
@@ -545,13 +584,15 @@ def update_task(task_id: int, body: TaskUpdate, db: Session = Depends(get_db), a
             raise HTTPException(422, "Invalid priority")
         if key == "employee_id":
             new_employee = db.get(User, value)
-            if not new_employee or not new_employee.active:
-                raise HTTPException(422, "Select an active employee")
+            if not new_employee or not new_employee.active or new_employee.role_id not in {HEAD, EDITOR, SHIFT_LEADER, STAFF}:
+                raise HTTPException(422, "Select an active business employee")
             if actor.role_id == EDITOR and not db.scalar(select(TimetableAssignment.id).join(Timetable).where(
                 Timetable.status == "Published", TimetableAssignment.editor_id == actor.id,
                 TimetableAssignment.employee_id == value, TimetableAssignment.work_date == task.assignment_date)):
                 raise HTTPException(403, "Editors may reassign only within their published shift for the task date")
         if key == "deadline":
+            if value.date() < task.start_date:
+                raise HTTPException(422, "Deadline cannot precede task start")
             value = utc_naive(value)
         old = getattr(task, key)
         if old != value:
@@ -591,7 +632,7 @@ def start_task(task_id: int, db: Session = Depends(get_db), actor: User = Depend
 
 
 @router.post("/tasks/{task_id}/submit")
-async def submit_task(task_id: int, report: Annotated[str, Form()], notes: Annotated[str, Form()] = "",
+async def submit_task(task_id: int, report: Annotated[str, Form(max_length=20_000)], notes: Annotated[str, Form(max_length=5_000)] = "",
     files: Annotated[list[UploadFile] | None, File()] = None, db: Session = Depends(get_db),
     actor: User = Depends(require_roles(STAFF, EDITOR, SHIFT_LEADER, HEAD))):
     task = get_task(db, task_id)

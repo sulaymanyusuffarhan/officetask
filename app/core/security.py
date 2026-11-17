@@ -3,6 +3,8 @@ from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatc
 
 
 password_hasher = PasswordHasher(time_cost=3, memory_cost=65_536, parallelism=2)
+# Used for unknown usernames so a missing account does not skip the expensive Argon2 check.
+DUMMY_PASSWORD_HASH = password_hasher.hash("not-a-real-office-task-password")
 
 
 def hash_password(password: str) -> str:

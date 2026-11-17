@@ -3,7 +3,6 @@ from datetime import date, datetime, timedelta
 import pytest
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 from fastapi.testclient import TestClient
 
 from app.core.roles import ADMIN, EDITOR, HEAD, PLANNER, SHIFT_LEADER, STAFF, ROLE_NAMES
@@ -15,8 +14,9 @@ from app.models.models import Department, Role, Shift, User
 
 
 @pytest.fixture
-def system():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+def system(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'office-test.db'}",
+                           connect_args={"check_same_thread": False, "timeout": 15})
     @event.listens_for(engine, "connect")
     def enable_foreign_keys(connection, _record):
         connection.execute("PRAGMA foreign_keys=ON")

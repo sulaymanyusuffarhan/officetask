@@ -10,7 +10,7 @@ python -m pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
-The tests use isolated in-memory SQLite and exercise authentication, Argon2 login, CSRF rejection, role denial, planner-to-head timetable review/publication/version locking and conflict detection, task assignment/progress/submission/verification, self-review prevention, planned-vs-actual calculations, PDF/XLSX generation, file upload validation/private download, admin/business-role separation, audit access and login throttling.
+The tests use an isolated file-backed SQLite database per test (with SQLite foreign keys enabled) and exercise authentication, Argon2 login, CSRF rejection, a six-role API access matrix, planner-to-head timetable review/publication/version locking and conflict detection, task assignment/progress/submission/verification, self-review prevention, performance/analytics and PDF/XLSX generation, file upload validation/private download, admin/business-role separation, audit access, login throttling, and seven independent authenticated TestClient sessions reading concurrently. This concurrency check is a lightweight application/session check, not a network load test or proof of PostgreSQL locking behavior.
 
 ## Migration checks
 

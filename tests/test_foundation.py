@@ -132,7 +132,7 @@ def test_private_attachment_validation_and_authorized_download(system, monkeypat
     download = client.get(f"/api/attachments/{files[0]['id']}")
     assert download.status_code == 200
     assert download.content.startswith(b"\x89PNG")
-    assert len(list(tmp_path.iterdir())) == 1
+    assert len(list(tmp_path.glob("*.png"))) == 1
 
 
 def test_admin_can_manage_accounts_but_does_not_gain_business_permissions(system):
@@ -213,3 +213,41 @@ def test_editor_people_and_task_assignment_are_scoped_to_published_shift(system)
         "employee_ids": [users["employee2"]], "assignment_date": "2026-11-17", "start_date": "2026-11-17",
         "deadline": "2026-11-17T23:00:00", "priority": "Normal"})
     assert denied.status_code == 403
+
+
+def test_access_matrix_for_all_six_roles(system):
+    client, _ = system
+    expectations = {
+        "head": {"users": 200, "tasks": 200, "timetables": 200, "dashboard": 200, "shift_reports": 200, "audit": 200},
+        "planner": {"users": 403, "tasks": 403, "timetables": 200, "dashboard": 403, "shift_reports": 403, "audit": 403},
+        "editor": {"users": 403, "tasks": 200, "timetables": 200, "dashboard": 403, "shift_reports": 200, "audit": 403},
+        "leader": {"users": 403, "tasks": 200, "timetables": 200, "dashboard": 403, "shift_reports": 200, "audit": 403},
+        "employee": {"users": 403, "tasks": 200, "timetables": 200, "dashboard": 403, "shift_reports": 403, "audit": 403},
+        "admin": {"users": 200, "tasks": 403, "timetables": 403, "dashboard": 403, "shift_reports": 403, "audit": 200},
+    }
+    paths = {"users": "/api/users", "tasks": "/api/tasks", "timetables": "/api/timetables",
+             "dashboard": "/api/reports/dashboard", "shift_reports": "/api/shift-reports", "audit": "/api/audit"}
+    for username, checks in expectations.items():
+        login(client, username)
+        for name, expected in checks.items():
+            response = client.get(paths[name])
+            assert response.status_code == expected, f"{username} {name}: {response.status_code} != {expected} ({response.text})"
+
+
+def test_seven_independent_sessions_can_read_concurrently(system):
+    from concurrent.futures import ThreadPoolExecutor
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    _, _context = system
+    clients = [TestClient(app) for _ in range(7)]
+    accounts = ["head", "planner", "editor", "employee", "employee2", "leader", "admin"]
+    for client, username in zip(clients, accounts):
+        login(client, username)
+    try:
+        with ThreadPoolExecutor(max_workers=7) as pool:
+            responses = list(pool.map(lambda client: client.get("/api/tasks"), clients))
+        assert [r.status_code for r in responses] == [200, 403, 200, 200, 200, 200, 403]
+    finally:
+        for client in clients:
+            client.close()

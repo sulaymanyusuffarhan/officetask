@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ORMModel(BaseModel):
@@ -9,6 +9,11 @@ class ORMModel(BaseModel):
 class UserCreate(BaseModel):
     username: str = Field(min_length=3, max_length=80, pattern=r"^[A-Za-z0-9._-]+$")
     full_name: str = Field(min_length=1, max_length=160)
+
+    @field_validator("full_name", mode="before")
+    @classmethod
+    def strip_full_name(cls, value):
+        return value.strip() if isinstance(value, str) else value
     password: str = Field(min_length=12, max_length=256)
     role_id: str
     department_id: int | None = None
@@ -29,15 +34,31 @@ class UserUpdate(BaseModel):
     department_id: int | None = None
     active: bool | None = None
 
+    @field_validator("full_name", mode="before")
+    @classmethod
+    def strip_full_name(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
 
 class DepartmentCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def strip_name(cls, value):
+        return value.strip() if isinstance(value, str) else value
 
 
 class ShiftCreate(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     start_time: str = Field(pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
     end_time: str = Field(pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def strip_name(cls, value):
+        return value.strip() if isinstance(value, str) else value
 
 
 class AssignmentCreate(BaseModel):
@@ -66,6 +87,11 @@ class TaskUpdate(BaseModel):
     employee_id: int | None = None
     reason: str = Field(min_length=3, max_length=1000)
 
+    @field_validator("title", mode="before")
+    @classmethod
+    def strip_title(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
 
 class TaskCreate(BaseModel):
     title: str = Field(min_length=1, max_length=180)
@@ -78,6 +104,11 @@ class TaskCreate(BaseModel):
     start_date: date = Field(default_factory=date.today)
     deadline: datetime
     priority: str = "Normal"
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def strip_title(cls, value):
+        return value.strip() if isinstance(value, str) else value
 
 
 class VerificationIn(BaseModel):
@@ -95,7 +126,7 @@ class AttendanceIn(BaseModel):
 class ShiftReportIn(BaseModel):
     shift_id: int | None = None
     report_date: date
-    unfinished: str = ""
-    challenges: str = ""
-    handover: str = ""
-    attendance_notes: str = ""
+    unfinished: str = Field(default="", max_length=10_000)
+    challenges: str = Field(default="", max_length=10_000)
+    handover: str = Field(default="", max_length=10_000)
+    attendance_notes: str = Field(default="", max_length=10_000)
