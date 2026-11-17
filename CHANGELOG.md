@@ -1,9 +1,10 @@
 # Changelog
 
-## Unreleased — Phase 1 foundation
+## Unreleased — operational MVP workflows
 
-- Established FastAPI, SQLAlchemy and Alembic project scaffolding.
-- Added PostgreSQL-backed Docker Compose topology with persistent volumes and no published database port.
-- Added liveness/readiness endpoints and branded foundation status page using the supplied original logos.
-- Added smoke tests and initial architecture, roadmap, security and testing documentation.
-- Business features, authentication and Windows operational scripts remain future work.
+- Added the normalized office workflow schema and Alembic migrations for users, roles, shifts, schedules, tasks, submissions, attachments, reporting and audit records.
+- Implemented Argon2 authentication, signed sessions, CSRF checks, role authorization, CLI initialization and admin account management.
+- Added weekly timetable editing/review/publication/versioning and individual employee task assignment/submission/verification APIs plus browser screens.
+- Added private validated attachment upload/download, shift handover/attendance, management analytics and PDF/Excel/CSV exports.
+- Added Windows 11 PowerShell/batch setup, start/stop, restricted firewall, backup/restore and scheduled-task utilities.
+- Expanded tests and documentation. Actual Docker Desktop/Windows, LAN, TLS, concurrency and recovery acceptance remain pending.

@@ -8,27 +8,49 @@
   <link rel="stylesheet" href="/static/css/site.css">
 </head>
 <body>
-  <main class="shell">
-    <header class="brand-row" aria-label="Institutional branding">
-      <img class="emblem" src="/static/images/emblem.png" alt="Official institutional emblem">
-      <div class="brand-copy">
-        <p class="eyebrow">LOCAL OFFICE SYSTEM</p>
-        <h1>Office Task &amp; Performance Management</h1>
-        <p>Weekly planning, accountable daily work, and verified reporting.</p>
-      </div>
-    </header>
-    <section class="status-card" aria-labelledby="status-heading">
-      <span class="status-dot" aria-hidden="true"></span>
-      <div>
-        <h2 id="status-heading">Foundation setup</h2>
-        <p>This server foundation is running. Secure sign-in and office workflows are being implemented in the next development phases.</p>
-      </div>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="topbar">
+    <div class="brand-lockup"><img class="emblem" src="/static/images/emblem.png" alt="Official institutional emblem">
+      <div><span class="eyebrow">OFFICE OPERATIONS</span><strong>Task &amp; Performance</strong></div></div>
+    <div id="identity" class="identity" hidden></div>
+  </header>
+  <main id="main" class="app-shell">
+    <section id="login-panel" class="login-panel" aria-labelledby="login-title">
+      <div class="login-brand"><img src="/static/images/emblem.png" alt="Official institutional emblem"></div>
+      <p class="eyebrow">SECURE OFFICE SIGN-IN</p>
+      <h1 id="login-title">Welcome back</h1>
+      <p class="muted">Sign in with the account provided by your system administrator.</p>
+      <form id="login-form" class="stack-form">
+        <label>Username<input name="username" autocomplete="username" required></label>
+        <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+        <button class="button primary" type="submit">Sign in</button>
+      </form>
+      <p id="login-error" class="message error" role="alert" hidden></p>
     </section>
-    <p class="notice">This page is not an operational task-management interface. Do not enter employee or confidential information until authentication and access controls are deployed.</p>
-    <footer>
-      <span>Designed for private use on the office network.</span>
-      <img src="/static/images/tbc-digital-logo.jpg" alt="TBC Digital" class="tbc-logo">
-    </footer>
+
+    <section id="workspace" hidden>
+      <nav class="navigation" aria-label="Main navigation">
+        <button data-view="dashboard" class="nav-button active">Overview</button>
+        <button data-view="tasks" class="nav-button">Tasks</button>
+        <button data-view="timetable" class="nav-button">Weekly timetable</button>
+        <button data-view="reports" class="nav-button">Shift reports</button>
+        <button data-view="analytics" class="nav-button">Performance</button>
+        <button data-view="accounts" class="nav-button admin-only" hidden>Accounts &amp; setup</button>
+        <button data-view="audit" class="nav-button audit-only" hidden>Audit history</button>
+        <button id="password-button" class="nav-button">Change password</button>
+        <button id="logout-button" class="button quiet">Sign out</button>
+      </nav>
+      <div id="flash" class="message" role="status" hidden></div>
+      <section id="view-dashboard" class="view"></section>
+      <section id="view-tasks" class="view" hidden></section>
+      <section id="view-timetable" class="view" hidden></section>
+      <section id="view-reports" class="view" hidden></section>
+      <section id="view-analytics" class="view" hidden></section>
+      <section id="view-accounts" class="view" hidden></section>
+      <section id="view-audit" class="view" hidden></section>
+    </section>
   </main>
+  <footer class="site-footer"><span>Private office system · Use only on the authorized network</span><img src="/static/images/tbc-digital-logo.jpg" alt="TBC Digital"></footer>
+  <script src="/static/js/app.js" defer></script>
 </body>
 </html>

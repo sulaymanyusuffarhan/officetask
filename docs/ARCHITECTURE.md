@@ -1,61 +1,41 @@
-# System architecture (initial target)
+# System architecture
 
-## Context
+## Deployment context
 
-The application serves a small office on one trusted local network. A single Windows 11 computer is the application host; employee devices use a browser over office Wi-Fi. The host owns the only database connection and the private file store. Employee browsers must never connect to PostgreSQL or access upload paths directly. Public-cloud hosting and inbound router port forwarding are out of scope.
-
-## Phase-one structure
+One Windows 11 computer hosts Docker Compose. Up to six office client browsers access FastAPI over the approved office subnet. PostgreSQL remains private to the Compose network; uploads and backup folders are local server paths. No public cloud or router port forwarding is part of the design.
 
 ```text
-Browser (office LAN)
-  └── HTTP :8000 ──> FastAPI / Uvicorn
-                         ├── local HTML, CSS, JS and supplied logos
-                         ├── SQLAlchemy ──> PostgreSQL (Compose private network only)
-                         └── private storage volumes (uploads / backups; not web-mounted)
+Office browser ── office LAN TCP 8000 ──> FastAPI/Uvicorn
+                                             ├── local HTML / CSS / JavaScript / logos
+                                             ├── SQLAlchemy ── Compose-private PostgreSQL
+                                             └── private uploads / timestamped paired backups
 ```
 
-```text
-app/
-  api/            HTTP route modules (domain routes are added in later phases)
-  core/           configuration and cross-cutting application services
-  db/             SQLAlchemy declarative base and session lifecycle
-  models/         normalized ORM entities (added with schema migrations)
-  services/       business rules (added with workflows)
-  static/         locally served assets; no CDN dependency
-  templates/      server-rendered page shells
-alembic/          versioned PostgreSQL schema changes
- tests/           automated test suite
- docs/             architecture, operations, security, testing and roadmap
-```
+The current HTTP Compose endpoint needs an organization-approved TLS reverse proxy before production credentials are sent over Wi-Fi; no certificate automation is shipped.
 
-## Selected technology
+## Repository layout
 
-- **Python 3.11+ / FastAPI / Uvicorn:** asynchronous-capable HTTP service with server-side permission checks.
-- **PostgreSQL / SQLAlchemy 2 / Alembic:** transactional relational store, ORM and versioned schema evolution.
-- **HTML/CSS/JavaScript:** lightweight browser UI. Bootstrap may be vendored locally if adopted; no production dependence on a CDN.
-- **Private local files:** generated storage path is outside static web serving; database records will hold metadata and ownership references.
-- **Docker Compose:** repeatable development setup and a candidate Windows 11 deployment route (Docker Desktop prerequisites). A native Windows installation alternative is still to be evaluated.
+- `app/api/routes.py`: role-guarded auth, administration, timetable/task, attachment, shift report, attendance and reporting routes.
+- `app/api/export_routes.py`, `analytics.py`: PDF/Excel and aggregated management reports.
+- `app/core`: configuration, session-derived current user, CSRF and role policy, Argon2 password hashing.
+- `app/db`, `app/models`: SQLAlchemy 2 sessions and normalized domain entities.
+- `alembic/versions`: reviewed database schema versions.
+- `app/templates`, `app/static`: server page shell, responsive local CSS/JS, official supplied assets.
+- `storage/uploads`: private random-name document store; not mounted as a static web directory.
+- `scripts/`, root `.bat`: Windows setup, run/stop, backup/restore and scheduled-task helpers.
 
-## Domain boundaries planned
+## Persistence and workflow invariants
 
-The normalized model is expected to separate identity and authorization (users, roles, permissions), organization (employees, departments, shifts), weekly planning (week, immutable/versioned timetable, assignments and approvals), execution (task/project, accountable per-person assignment, state history, submissions, private attachments, verification), operations (attendance/leave, shift/day reports, handovers), and governance (notifications, audit events, settings). Domain entities and constraints will be introduced with tested migrations rather than pre-creating speculative tables.
+Normalized PostgreSQL entities cover users/roles, departments/shifts, weekly timetable versions and assignments, tasks, status history, submissions, private attachment metadata, verifications, attendance exceptions, handover reports and audit logs. Each employee on a shared piece of work has an independent task row. Timetable versions use `(week_start, version)` uniqueness; week allocations must fall inside the seven-day week and the server rejects overlapping shifts. Published plans are locked; revisions require a cloned version and recorded reason. State transitions and reviewer identity are audited.
 
-A published timetable is a versioned record. Changes after publication must create a new version with actor, timestamp, reason and before/after values. Each staff member gets an accountable assignment even for collaborative work. Submission is distinct from verification; only an authorized reviewer can mark work verified. These invariants belong in backend services and database constraints where practical, not only UI controls.
+A submission is not a verified result. Only the assigning editor or Head may verify/reject/request correction, and nobody may verify their own task. Reported submission and verified rates use separate numerators/denominator. Attendance exceptions (leave, absent, reassigned) are shown separately rather than turning a missing submission into an automatic performance failure.
 
-## Request and authorization model
+## Authentication, authorization and network protections
 
-Browser requests will use secure server-side sessions with CSRF protection for state-changing forms. Passwords will be Argon2-hashed. Authorization is deny-by-default and enforced on every backend operation, with role and record-scope checks. Admin technical privileges do not grant workflow approval automatically. Audit events are append-only for ordinary application roles. File download routes will authorize the requesting user against the associated task/submission before streaming a file.
+The browser receives a signed, HttpOnly, SameSite=Strict cookie containing the authenticated user ID/CSRF token; the backend reloads the account and role from the database each request. Mutating requests require the session CSRF token in `X-CSRF-Token`. Passwords are Argon2id-hashed, sign-in failures are rate-limited per app process, and permission checks execute on API routes. Technical administrator access does not imply workflow approval. Production cookies require `APP_ENV=production` (Secure), which requires HTTPS to work.
 
-These controls are architectural requirements, **not yet implemented in phase one**.
+Attachments use allowlisted file extensions/content signatures, a per-file size ceiling, randomized paths and authorization-gated downloads. The original filename is metadata only. Antivirus scanning is not included. Audit rows are not editable through ordinary app routes but are not immutable against a database administrator.
 
-## LAN deployment
+## Operational boundary
 
-The service binds to the LAN-facing interface in deployment. The Windows firewall is the network boundary: permit the application port only from the office subnet; do not expose port 5432; do not configure router forwarding. Use a DHCP reservation or static address and distribute the host URL internally. Server-only backups must include PostgreSQL and uploads from a consistent snapshot. Operational scripts and restore drills are later milestones.
-
-## Operational properties
-
-- Health endpoints distinguish process liveness from database readiness.
-- PostgreSQL data, uploads and backups use persistent storage in Compose.
-- Environment-specific secrets are provided out-of-band in `.env`, excluded from source control.
-- Browser-facing assets are local; once installed the web UI does not require a CDN.
-- Logs must avoid passwords, session IDs and sensitive report contents; retention and redaction policy will be set before production use.
+Compose maps application TCP 8000 configurable through `APP_PORT`/`APP_BIND_IP`, while PostgreSQL has no host port. Windows scripts can create a subnet-scoped firewall rule and pause the web service briefly during paired database/file backup. Docker restart policies start containers only when Docker Desktop is running. The optional logon task is not a service running before Windows user logon. Windows scripts have not been executed in this Linux environment.

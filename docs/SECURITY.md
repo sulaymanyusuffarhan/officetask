@@ -1,25 +1,37 @@
-# Security and deployment notes
+# Security, trust boundaries and go-live gates
 
-## Trust boundaries
+## Trust boundary
 
-Treat the host machine and its disk as sensitive. The office LAN is not a substitute for application authentication. Each browser-facing action must be authenticated, authorized for its record scope, validated and audited on the server. PostgreSQL must remain on an internal container network or loopback, never exposed to employee devices. Private uploads and backup archives must not be mounted beneath the static web root.
+The FastAPI service is the only employee-facing entry point. PostgreSQL runs on the private Compose network and its port is not published on the Windows host. Uploads use random stored names in a private local folder; downloads are routed through an authenticated task-scope check. Do not expose the server to the public internet or configure router port forwarding.
 
-## Phase-one controls and gaps
+## Implemented controls
 
-Implemented now: `.env`-based configuration, secrets excluded by `.gitignore`, private PostgreSQL service with no host port in Compose, non-root container user, server-side PostgreSQL readiness, local static assets, private storage volume paths not mounted as public files, and clear warning on the foundation page.
+- Passwords hashed with Argon2id via `argon2-cffi`; no plaintext password field or bootstrap network endpoint.
+- Signed session cookie with HttpOnly, SameSite=Strict, configurable expiry; secure-cookie flag is enabled for `APP_ENV=production`.
+- Per-process failed-login throttling, CSRF header checks on all non-read methods except the login endpoint, input schemas and server-side role checks.
+- Roles are reloaded from the database on each authenticated request; disabled accounts lose access. A technical administrator cannot approve schedules or verify tasks solely by being an administrator.
+- Timetable date/status/version rules, overlapping shift conflict checks, independent task review, and audit records for key workflow actions.
+- File extension allowlist, content signatures for PDF/PNG/JPEG/Office ZIP containers, per-file size limit, 10-file limit, random storage name, private storage and authenticated download authorization.
+- PostgreSQL has no host port mapping; local CSS/JS; Compose container runs as a non-root user; secrets live in untracked `.env`.
+- Database/upload paired-backup tooling, manifest checksums, restore confirmation, and access-restricted LAN firewall helper.
 
-Not implemented yet: authentication, session/CSRF controls, role-level and record-level authorization, audit trail, rate limiting, attachment validation/scanning, Windows firewall rules, backup automation, restore verification, TLS policy and production hardening. Consequently this phase is not appropriate for real personnel data or live office workflows.
+## Known gaps — not security-certified
 
-## Before a deployment
+1. **HTTPS is not provisioned by the project.** Compose currently maps the app over HTTP. A signed cookie and CSRF do not encrypt passwords/traffic. Obtain an institution-approved certificate and configure a trusted LAN reverse proxy/TLS path before sending real credentials over Wi-Fi. `APP_ENV=production` marks cookies Secure; plain HTTP would not carry them.
+2. No automated antivirus/content-disarm scanning is provided for attachments. Do not upload sensitive/hostile files until the institution accepts this risk or supplies scanning.
+3. Login throttle is per-process memory; it resets on restart and is not a distributed rate limiter. Keep a single instance behind LAN firewall; upgrade this control before scaling.
+4. Audit records are append-oriented through application routes but not cryptographically tamper-proof against database/server administrators. Restrict PostgreSQL/Windows access and export logs per institutional policy.
+5. There is no immutable offsite backup sync, formal retention/privacy schedule, audit alerting, or tested Windows operational recovery run in this environment.
+6. Backend permissions are enforced, but the system has not undergone a professional penetration test or Windows/PostgreSQL review. Do not treat it as approved for protected personal data until your institution authorizes it.
 
-1. Generate unique strong `SECRET_KEY` and database credentials, store `.env` with restrictive Windows ACLs, and keep it out of backups shared broadly.
-2. Configure a static address or DHCP reservation; allow only the office LAN subnet to reach the application TCP port in Windows Defender Firewall.
-3. Do not publish PostgreSQL's port or enable router port forwarding.
-4. Restrict server and backup drive access to authorized administrators. Encrypt backups at rest where supported.
-5. Configure system updates, endpoint protection, power/restart behavior, service supervision and physical access.
-6. Use HTTPS on the LAN if credentials traverse untrusted Wi-Fi; deployment certificate provisioning is still to be specified.
-7. Test restoration before loading live data and schedule periodic recovery drills.
+## Required before real data
 
-## Incident and data handling
+- Review/accept applicable privacy, public-institution ICT, personnel-record retention and incident response rules.
+- Configure a trusted HTTPS certificate on the office LAN; verify certificate trust on all seven devices and ensure no WAN exposure.
+- Verify Windows firewall scope and guest/VLAN isolation from a separate client; disable database host publishing and keep Windows security updates on.
+- Restrict ACLs on `.env`, database volume, `storage/uploads` and `storage/backups`; protect server physical access.
+- Set unique production secrets, secure session cookie mode, backup retention, and role account governance.
+- Execute two-client workflow checks, simultaneous writes, restart tests and a database-plus-upload restore from an off-host copy.
+- Establish attachment scanning, logging retention, staff privacy notice, administrator duties and incident contacts.
 
-Do not commit `.env`, database dumps, real employee data, session secrets, uploads or backups. Report suspected credential or data exposure to the organization's designated security contact, rotate affected secrets, preserve relevant logs and follow institutional incident procedures. Legal retention, privacy notice, and data-residency requirements must be confirmed with the organization before production rollout.
+Never commit `.env`, backups, database dumps, uploads, real employee data, or credentials. Default development configuration is not an office production profile.
