@@ -75,6 +75,7 @@ class MetricValues(BaseModel):
 class WeeklyReportIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     platform: Literal["youtube", "facebook", "instagram", "x", "tiktok"]
+    account_id: int | None = Field(default=None, gt=0)
     reporting_date: date
     reporting_week: date
     metrics: MetricValues
@@ -113,6 +114,10 @@ class AccountIn(BaseModel):
         if parsed and (parsed.scheme not in {"http", "https"} or not parsed.netloc):
             raise ValueError("Profile link must be an absolute http or https URL")
         return value
+
+
+class AccountCreateIn(AccountIn):
+    platform: Literal["youtube", "facebook", "instagram", "x", "tiktok"]
 
 
 class OfficersIn(BaseModel):
@@ -161,11 +166,20 @@ def _audit(db: Session, actor: User, action: str, entity: str, entity_id, detail
     db.commit()
 
 
-def _account(db: Session, platform: str) -> SocialAccount:
-    row = db.scalar(select(SocialAccount).where(SocialAccount.platform == platform))
-    if not row or not row.account_handle:
-        raise HTTPException(409, f"Configure the verified official {PLATFORMS[platform]} account before entering statistics")
-    return row
+def _account(db: Session, platform: str, account_id: int | None = None) -> SocialAccount:
+    if account_id is not None:
+        row = db.get(SocialAccount, account_id)
+        if row is None or row.platform != platform or not row.account_handle:
+            raise HTTPException(422, "Select a configured account belonging to this platform")
+        return row
+    candidates = db.scalars(select(SocialAccount).where(SocialAccount.platform == platform)
+                            .order_by(SocialAccount.id)).all()
+    configured = [row for row in candidates if row.account_handle]
+    if len(configured) == 1:
+        return configured[0]
+    if len(configured) > 1:
+        raise HTTPException(422, f"Select the specific {PLATFORMS[platform]} account for this report")
+    raise HTTPException(409, f"Configure the verified official {PLATFORMS[platform]} account before entering statistics")
 
 
 def _date_string(value: date | datetime | None):
@@ -202,7 +216,7 @@ def _report_json(db: Session, row: SocialWeeklyReport) -> dict:
     evidence = db.scalars(select(SocialEvidence).where(SocialEvidence.report_id == row.id).order_by(SocialEvidence.id)).all()
     return {
         "id": row.id, "platform": row.platform, "platform_name": PLATFORMS[row.platform],
-        "account_name": row.account_name_snapshot, "account_handle": row.account_handle_snapshot,
+        "account_id": row.account_id, "account_name": row.account_name_snapshot, "account_handle": row.account_handle_snapshot,
         "reporting_date": _date_string(row.reporting_date), "reporting_week": _date_string(row.reporting_week),
         "reporting_week_end": _date_string(row.reporting_week + timedelta(days=6)), "metrics": row.metrics,
         "calculations": _calculations(row.platform, row.metrics), "best_content": row.best_content,
@@ -263,52 +277,57 @@ def _period_net(rows: list[SocialWeeklyReport], audience_start: int | None, audi
     return new_followers - lost_followers if new_followers is not None and lost_followers is not None else None
 
 
+def _quarter_account_summary(platform: str, label: str, account: SocialAccount | None,
+                             rows: list[SocialWeeklyReport]) -> dict:
+    rows.sort(key=lambda r: (r.reporting_week, r.id))
+    first, last = (rows[0], rows[-1]) if rows else (None, None)
+    begin = first.metrics.get("audience_start") if first else None
+    finish = last.metrics.get("audience_end") if last else None
+    net = _period_net(rows, begin, finish)
+    rate = round(net * 100 / begin, 2) if net is not None and begin else None
+    totals = {key: _nullable_sum(rows, key) for key in ("new_followers", "lost_followers", "reach", "impressions", "views", "likes", "comments", "shares", "saves", "posts_published", "videos_published")}
+    interactions_complete = all(_nullable_sum(rows, key) is not None for key in INTERACTION_METRICS)
+    interaction_total = sum(totals[key] for key in INTERACTION_METRICS) if interactions_complete else None
+    if interaction_total is not None and totals["saves"] is not None:
+        interaction_total += totals["saves"]
+    denominator_name = "views" if platform in {"youtube", "tiktok"} else "reach"
+    denominator = totals[denominator_name]
+    engagement = round(interaction_total * 100 / denominator, 2) if interaction_total is not None and denominator else None
+    return {
+        "platform": platform, "platform_name": label, "account_id": account.id if account else None,
+        "account_name": first.account_name_snapshot if first else account.account_name if account else None,
+        "account_handle": first.account_handle_snapshot if first else account.account_handle if account else None,
+        "weeks_reported": len(rows), "weekly_report_ids": [r.id for r in rows],
+        "audience_start": begin, "audience_end": finish, "net_follower_growth": net,
+        "audience_growth_percent": rate, **totals,
+        "engagement_interactions": interaction_total, "engagement_denominator": denominator_name,
+        "engagement_rate_percent": engagement,
+        "weekly_narratives": [{"report_id": r.id, "reporting_week": r.reporting_week.isoformat(),
+                              "best_content": r.best_content, "recommendations": r.recommendations} for r in rows],
+    }
+
+
 def _quarter_snapshot(db: Session, year: int, quarter: int) -> dict:
     start, end = _quarter_bounds(year, quarter)
-    accounts = {a.platform: a for a in db.scalars(select(SocialAccount)).all()}
+    accounts = db.scalars(select(SocialAccount).order_by(SocialAccount.platform, SocialAccount.id)).all()
     reports = db.scalars(select(SocialWeeklyReport).where(
         SocialWeeklyReport.status == "Approved", SocialWeeklyReport.reporting_week <= end,
         SocialWeeklyReport.reporting_week >= start - timedelta(days=6)).order_by(SocialWeeklyReport.reporting_week, SocialWeeklyReport.id)).all()
-    by_platform: dict[str, list[SocialWeeklyReport]] = {p: [] for p in PLATFORMS}
+    by_account: dict[int, list[SocialWeeklyReport]] = {}
     for report in reports:
         if report.reporting_week + timedelta(days=6) >= start and report.reporting_week <= end:
-            by_platform[report.platform].append(report)
-    result = []
+            by_account.setdefault(report.account_id, []).append(report)
+    results = []
     for platform, label in PLATFORMS.items():
-        rows = by_platform[platform]
-        rows.sort(key=lambda r: (r.reporting_week, r.id))
-        first = rows[0] if rows else None
-        last = rows[-1] if rows else None
-        m0 = first.metrics if first else {}
-        m1 = last.metrics if last else {}
-        begin, finish = m0.get("audience_start"), m1.get("audience_end")
-        net = _period_net(rows, begin, finish)
-        rate = round(net * 100 / begin, 2) if net is not None and begin else None
-        totals = {key: _nullable_sum(rows, key) for key in ("new_followers", "lost_followers", "reach", "impressions", "views", "likes", "comments", "shares", "saves", "posts_published", "videos_published")}
-        engagements_complete = all(_nullable_sum(rows, key) is not None for key in INTERACTION_METRICS)
-        interaction_total = sum(totals[key] for key in INTERACTION_METRICS) if engagements_complete else None
-        if interaction_total is not None and totals["saves"] is not None:
-            interaction_total += totals["saves"]
-        denom_name = "views" if platform in {"youtube", "tiktok"} else "reach"
-        denom = totals[denom_name]
-        engagement = round(interaction_total * 100 / denom, 2) if interaction_total is not None and denom else None
-        account = accounts.get(platform)
-        result.append({
-            "platform": platform, "platform_name": label,
-            "account_name": (first.account_name_snapshot if first else account.account_name if account else None),
-            "account_handle": (first.account_handle_snapshot if first else account.account_handle if account else None),
-            "weeks_reported": len(rows), "weekly_report_ids": [r.id for r in rows],
-            "audience_start": begin, "audience_end": finish, "net_follower_growth": net,
-            "audience_growth_percent": rate, **totals,
-            "engagement_interactions": interaction_total, "engagement_denominator": denom_name,
-            "engagement_rate_percent": engagement,
-            "weekly_narratives": [{"report_id": r.id, "reporting_week": r.reporting_week.isoformat(),
-                                  "best_content": r.best_content, "recommendations": r.recommendations} for r in rows],
-        })
+        platform_accounts = [account for account in accounts if account.platform == platform]
+        if not platform_accounts:
+            results.append(_quarter_account_summary(platform, label, None, []))
+        for account in platform_accounts:
+            results.append(_quarter_account_summary(platform, label, account, by_account.get(account.id, [])))
     return {"year": year, "quarter": quarter, "start_date": start.isoformat(), "end_date": end.isoformat(),
-            "method": "Consolidated from approved weekly reports whose Monday-to-Sunday reporting weeks overlap this calendar quarter. No values are synthesized; a total is N/A if any included report marks that metric N/A. Audience growth uses the first reported start and last reported end values.",
-            "engagement_formula": "YouTube/TikTok: (likes + comments + shares + saves when reported) / total views × 100. Facebook/Instagram/X: same numerator / total reach × 100. Likes/comments/shares and denominator must be available; otherwise N/A. Saves are only included when reported.",
-            "platforms": result, "approved_weekly_report_count": len(reports)}
+            "method": "Consolidated separately for each registered account from its approved weekly reports whose Monday-to-Sunday reporting weeks overlap this calendar quarter. Accounts are never combined; no values are synthesized. A total is N/A if any included report marks that metric N/A. Audience growth uses the first reported start and last reported end values.",
+            "engagement_formula": "Per account: YouTube/TikTok (likes + comments + shares + saves when reported) / total views × 100. Facebook/Instagram/X use total reach as denominator. Likes/comments/shares and denominator must be available; otherwise N/A. Saves are only included when reported.",
+            "platforms": results, "approved_weekly_report_count": len(reports)}
 
 
 def _parse_import(data: bytes, suffix: str) -> tuple[list[str], list[dict]]:
@@ -368,7 +387,10 @@ def _import_rows(db: Session, rows: list[dict]) -> tuple[list[dict], list[dict]]
         raise HTTPException(422, f"Import is limited to {IMPORT_MAX_ROWS} data rows")
     expected = {"platform", "reporting_date", "reporting_week", *METRICS, "best_content", "recommendations"}
     prepared, errors, seen = [], [], set()
-    accounts = {r.platform: r for r in db.scalars(select(SocialAccount)).all() if r.account_handle}
+    accounts: dict[str, list[SocialAccount]] = {}
+    for row in db.scalars(select(SocialAccount).order_by(SocialAccount.platform, SocialAccount.id)).all():
+        if row.account_handle:
+            accounts.setdefault(row.platform, []).append(row)
     for index, raw in enumerate(rows, start=2):
         try:
             normalized = {str(k).strip().lower(): _normalize_import_value(v) for k, v in raw.items() if k is not None}
@@ -378,8 +400,18 @@ def _import_rows(db: Session, rows: list[dict]) -> tuple[list[dict], list[dict]]
             platform = str(normalized["platform"]).strip().lower()
             if platform not in PLATFORMS:
                 raise ValueError("platform must be youtube, facebook, instagram, x, or tiktok")
-            if platform not in accounts:
-                raise ValueError(f"The official {PLATFORMS[platform]} account is not configured")
+            platform_accounts = accounts.get(platform, [])
+            if not platform_accounts:
+                raise ValueError(f"No official {PLATFORMS[platform]} account is configured")
+            selected_handle = normalized.get("account_handle")
+            if selected_handle:
+                account = next((a for a in platform_accounts if a.account_handle.casefold() == str(selected_handle).casefold()), None)
+                if account is None:
+                    raise ValueError(f"account_handle does not match a configured {PLATFORMS[platform]} account")
+            elif len(platform_accounts) == 1:
+                account = platform_accounts[0]
+            else:
+                raise ValueError(f"account_handle is required because multiple {PLATFORMS[platform]} accounts are configured")
             m = {}
             for key in METRICS:
                 val = normalized[key]
@@ -392,18 +424,20 @@ def _import_rows(db: Session, rows: list[dict]) -> tuple[list[dict], list[dict]]
                     if parsed < 0:
                         raise ValueError(f"{key} cannot be negative")
                     m[key] = parsed
-            report_data = {"platform": platform, "reporting_date": normalized["reporting_date"],
+            report_data = {"platform": platform, "account_id": account.id,
+                           "reporting_date": normalized["reporting_date"],
                            "reporting_week": normalized["reporting_week"], "metrics": m,
                            "best_content": str(normalized["best_content"] or ""),
                            "recommendations": str(normalized["recommendations"] or "")}
             validated = WeeklyReportIn.model_validate(report_data)
-            key = (platform, validated.reporting_week)
+            key = (account.id, validated.reporting_week)
             duplicate = key in seen or db.scalar(select(SocialWeeklyReport.id).where(
-                SocialWeeklyReport.account_id == accounts[platform].id, SocialWeeklyReport.reporting_week == validated.reporting_week))
+                SocialWeeklyReport.account_id == account.id, SocialWeeklyReport.reporting_week == validated.reporting_week))
             if duplicate:
                 raise ValueError("Duplicate reporting period already exists in this file or database")
             seen.add(key)
-            prepared.append({"row_number": index, "valid": True, **validated.model_dump(mode="json"), "status": "Ready to import"})
+            prepared.append({"row_number": index, "valid": True, **validated.model_dump(mode="json"),
+                             "account_handle": account.account_handle, "status": "Ready to import"})
         except Exception as exc:
             errors.append({"row_number": index, "valid": False, "error": str(exc)})
     return prepared, errors
@@ -524,35 +558,50 @@ def social_access(db: Session = Depends(get_db), actor: User = Depends(current_u
     return {"allowed": _is_officer(db, actor), "is_head": actor.role_id == HEAD}
 
 
+def _duplicate_account_handle(db: Session, platform: str, handle: str, exclude_id: int | None = None) -> bool:
+    existing = db.scalars(select(SocialAccount).where(SocialAccount.platform == platform)).all()
+    return any(row.id != exclude_id and row.account_handle and row.account_handle.casefold() == handle.casefold()
+               for row in existing)
+
+
 @router.get("/accounts")
 def social_accounts(db: Session = Depends(get_db), actor: User = Depends(current_user)):
     _require_officer(db, actor)
-    existing = {r.platform: r for r in db.scalars(select(SocialAccount)).all()}
-    return [{"platform": key, "platform_name": label,
-             "configured": bool(existing.get(key) and existing[key].account_handle),
-             "account_name": existing[key].account_name if key in existing else None,
-             "account_handle": existing[key].account_handle if key in existing else None,
-             "profile_url": existing[key].profile_url if key in existing else None,
-             "updated_at": existing[key].updated_at.isoformat() + "Z" if key in existing else None}
-            for key, label in PLATFORMS.items()]
+    rows = db.scalars(select(SocialAccount).order_by(SocialAccount.platform, SocialAccount.account_handle, SocialAccount.id)).all()
+    return [{"id": row.id, "platform": row.platform, "platform_name": PLATFORMS[row.platform],
+             "configured": bool(row.account_handle), "account_name": row.account_name,
+             "account_handle": row.account_handle, "profile_url": row.profile_url,
+             "updated_at": row.updated_at.isoformat() + "Z"}
+            for row in rows]
 
 
-@router.put("/accounts/{platform}")
-def configure_account(platform: str, body: AccountIn, db: Session = Depends(get_db), actor: User = Depends(current_user)):
+@router.post("/accounts", status_code=201)
+def create_account(body: AccountCreateIn, db: Session = Depends(get_db), actor: User = Depends(current_user)):
     _require_head(actor)
-    if platform not in PLATFORMS:
-        raise HTTPException(404, "Unsupported social platform")
-    row = db.scalar(select(SocialAccount).where(SocialAccount.platform == platform))
-    action = "social_account_updated" if row else "social_account_registered"
-    if row:
-        row.account_name, row.account_handle, row.profile_url = body.account_name, body.account_handle, body.profile_url
-        row.updated_at = datetime.utcnow()
-    else:
-        row = SocialAccount(platform=platform, account_name=body.account_name, account_handle=body.account_handle,
-                            profile_url=body.profile_url, configured_by_id=actor.id)
-        db.add(row); db.flush()
-    _audit(db, actor, action, "social_account", row.id, {"platform": platform, "account_handle": body.account_handle})
-    return {"platform": platform, "configured": True}
+    if _duplicate_account_handle(db, body.platform, body.account_handle):
+        raise HTTPException(409, "That handle is already registered for this platform")
+    row = SocialAccount(platform=body.platform, account_name=body.account_name, account_handle=body.account_handle,
+                        profile_url=body.profile_url, configured_by_id=actor.id)
+    db.add(row); db.flush()
+    _audit(db, actor, "social_account_registered", "social_account", row.id,
+           {"platform": body.platform, "account_handle": body.account_handle})
+    return {"id": row.id, "platform": row.platform, "configured": True}
+
+
+@router.put("/accounts/{account_id}")
+def update_account(account_id: int, body: AccountIn, db: Session = Depends(get_db), actor: User = Depends(current_user)):
+    _require_head(actor)
+    row = db.get(SocialAccount, account_id)
+    if not row:
+        raise HTTPException(404, "Social account not found")
+    if _duplicate_account_handle(db, row.platform, body.account_handle, exclude_id=row.id):
+        raise HTTPException(409, "That handle is already registered for this platform")
+    old_handle = row.account_handle
+    row.account_name, row.account_handle, row.profile_url = body.account_name, body.account_handle, body.profile_url
+    row.updated_at = datetime.utcnow()
+    _audit(db, actor, "social_account_updated", "social_account", row.id,
+           {"platform": row.platform, "previous_handle": old_handle, "account_handle": body.account_handle})
+    return {"id": row.id, "platform": row.platform, "configured": True}
 
 
 @router.get("/officers")
@@ -584,7 +633,7 @@ def set_officers(body: OfficersIn, db: Session = Depends(get_db), actor: User = 
 @router.get("/template.csv")
 def csv_template(db: Session = Depends(get_db), actor: User = Depends(current_user)):
     _require_officer(db, actor)
-    headers = ["platform", "reporting_date", "reporting_week", *METRICS, "best_content", "recommendations"]
+    headers = ["platform", "account_handle", "reporting_date", "reporting_week", *METRICS, "best_content", "recommendations"]
     output = io.StringIO(); writer = csv.writer(output); writer.writerow(headers)
     return StreamingResponse(iter([output.getvalue()]), media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=social-weekly-import-template.csv"})
@@ -594,11 +643,11 @@ def csv_template(db: Session = Depends(get_db), actor: User = Depends(current_us
 def xlsx_template(db: Session = Depends(get_db), actor: User = Depends(current_user)):
     _require_officer(db, actor)
     workbook = Workbook(); sheet = workbook.active; sheet.title = "Weekly data"
-    headers = ["platform", "reporting_date", "reporting_week", *METRICS, "best_content", "recommendations"]
+    headers = ["platform", "account_handle", "reporting_date", "reporting_week", *METRICS, "best_content", "recommendations"]
     sheet.append(headers)
     instructions = workbook.create_sheet("Instructions")
     instructions.append(["Enter one weekly record per row on the Weekly data sheet."])
-    instructions.append(["Allowed platform values: youtube, facebook, instagram, x, tiktok."])
+    instructions.append(["Allowed platform values: youtube, facebook, instagram, x, tiktok. Enter the configured account handle when multiple accounts exist on that platform."])
     instructions.append(["Reporting week must be the Monday date for that Monday-to-Sunday period."])
     instructions.append(["Enter a whole number including 0, or N/A when unavailable. Do not invent or estimate values."])
     instructions.append(["This blank template contains no social media statistics. Fill with source-verified data before import."])
@@ -609,7 +658,7 @@ def xlsx_template(db: Session = Depends(get_db), actor: User = Depends(current_u
 
 @router.get("/weekly")
 def list_weekly(start: date | None = None, end: date | None = None, platform: str | None = None,
-               db: Session = Depends(get_db), actor: User = Depends(current_user)):
+               account_id: int | None = None, db: Session = Depends(get_db), actor: User = Depends(current_user)):
     _require_officer(db, actor)
     query = select(SocialWeeklyReport).order_by(SocialWeeklyReport.reporting_week.desc(), SocialWeeklyReport.platform)
     if start: query = query.where(SocialWeeklyReport.reporting_week >= start)
@@ -617,16 +666,18 @@ def list_weekly(start: date | None = None, end: date | None = None, platform: st
     if platform:
         if platform not in PLATFORMS: raise HTTPException(422, "Unknown platform filter")
         query = query.where(SocialWeeklyReport.platform == platform)
+    if account_id is not None:
+        query = query.where(SocialWeeklyReport.account_id == account_id)
     return [_report_json(db, r) for r in db.scalars(query).all()]
 
 
 @router.post("/weekly", status_code=201)
 def create_weekly(body: WeeklyReportIn, db: Session = Depends(get_db), actor: User = Depends(current_user)):
     _require_officer(db, actor)
-    account = _account(db, body.platform)
+    account = _account(db, body.platform, body.account_id)
     if db.scalar(select(SocialWeeklyReport.id).where(SocialWeeklyReport.account_id == account.id,
             SocialWeeklyReport.reporting_week == body.reporting_week)):
-        raise HTTPException(409, "A report already exists for this platform and reporting week")
+        raise HTTPException(409, "A report already exists for this account and reporting week")
     row = SocialWeeklyReport(account_id=account.id, platform=body.platform, account_name_snapshot=account.account_name,
         account_handle_snapshot=account.account_handle, reporting_date=body.reporting_date, reporting_week=body.reporting_week,
         metrics=body.metrics.model_dump(), best_content=body.best_content.strip(), recommendations=body.recommendations.strip(),
@@ -644,9 +695,11 @@ def update_weekly(report_id: int, body: WeeklyReportIn, db: Session = Depends(ge
     if not row: raise HTTPException(404, "Weekly report not found")
     _can_edit_weekly(db, actor, row)
     if body.platform != row.platform: raise HTTPException(422, "A report's platform cannot be changed")
+    if body.account_id is not None and body.account_id != row.account_id:
+        raise HTTPException(422, "A report's account cannot be changed")
     if db.scalar(select(SocialWeeklyReport.id).where(SocialWeeklyReport.account_id == row.account_id,
             SocialWeeklyReport.reporting_week == body.reporting_week, SocialWeeklyReport.id != row.id)):
-        raise HTTPException(409, "A report already exists for this platform and reporting week")
+        raise HTTPException(409, "A report already exists for this account and reporting week")
     old = {"status": row.status, "reporting_week": row.reporting_week.isoformat(), "metrics": row.metrics}
     row.reporting_date, row.reporting_week = body.reporting_date, body.reporting_week
     row.metrics, row.best_content, row.recommendations = body.metrics.model_dump(), body.best_content.strip(), body.recommendations.strip()
@@ -781,15 +834,16 @@ async def import_commit(file: UploadFile = File(...), db: Session = Depends(get_
     headers, source_rows = _parse_import(data, suffix)
     prepared, errors = _import_rows(db, source_rows)
     if errors: raise HTTPException(422, {"message": "Import preview has validation errors; correct the file and preview it again", "errors": errors})
-    accounts = {a.platform: a for a in db.scalars(select(SocialAccount)).all()}
     directory = Path(settings.upload_dir).resolve() / "social"; directory.mkdir(parents=True, exist_ok=True)
     stored = secrets.token_hex(24) + suffix
     path = directory / stored; path.write_bytes(data)
     created = []
     try:
         for item in prepared:
-            platform = item["platform"]; account = accounts[platform]
-            body = WeeklyReportIn.model_validate({k: item[k] for k in ("platform", "reporting_date", "reporting_week", "metrics", "best_content", "recommendations")})
+            platform = item["platform"]; account = db.get(SocialAccount, item["account_id"])
+            if account is None:
+                raise HTTPException(409, "A selected social account was removed; preview the import again")
+            body = WeeklyReportIn.model_validate({k: item[k] for k in ("platform", "account_id", "reporting_date", "reporting_week", "metrics", "best_content", "recommendations")})
             row = SocialWeeklyReport(account_id=account.id, platform=platform, account_name_snapshot=account.account_name or "",
                 account_handle_snapshot=account.account_handle or "", reporting_date=body.reporting_date, reporting_week=body.reporting_week,
                 metrics=body.metrics.model_dump(), best_content=body.best_content.strip(), recommendations=body.recommendations.strip(),
@@ -880,13 +934,15 @@ def review_quarter(quarter_id: int, body: ReviewIn, db: Session = Depends(get_db
     return _quarter_json(row, db)
 
 
-def _weekly_rows(db: Session, start: date | None, end: date | None, platform: str | None) -> list[dict]:
+def _weekly_rows(db: Session, start: date | None, end: date | None, platform: str | None, account_id: int | None = None) -> list[dict]:
     query = select(SocialWeeklyReport).order_by(SocialWeeklyReport.reporting_week, SocialWeeklyReport.platform)
     if start: query = query.where(SocialWeeklyReport.reporting_week >= start)
     if end: query = query.where(SocialWeeklyReport.reporting_week <= end)
     if platform:
         if platform not in PLATFORMS: raise HTTPException(422, "Unknown platform filter")
         query = query.where(SocialWeeklyReport.platform == platform)
+    if account_id is not None:
+        query = query.where(SocialWeeklyReport.account_id == account_id)
     rows = db.scalars(query).all()
     return [_report_json(db, row) for row in rows]
 
@@ -903,7 +959,7 @@ def social_analytics(start: date, end: date, grain: Literal["week", "month", "qu
         if platform not in PLATFORMS: raise HTTPException(422, "Unknown platform filter")
         rows = [r for r in rows if r.platform == platform]
     rows = [row for row in rows if row.reporting_week + timedelta(days=6) >= start and row.reporting_week <= end]
-    grouped: dict[tuple[str, str], list[SocialWeeklyReport]] = {}
+    grouped: dict[tuple[str, int, str], list[SocialWeeklyReport]] = {}
     for row in rows:
         if grain == "week":
             period = row.reporting_week.isoformat()
@@ -911,9 +967,10 @@ def social_analytics(start: date, end: date, grain: Literal["week", "month", "qu
             period = f"{row.reporting_week.year:04d}-{row.reporting_week.month:02d}"
         else:
             period = f"{row.reporting_week.year:04d}-Q{(row.reporting_week.month - 1) // 3 + 1}"
-        grouped.setdefault((row.platform, period), []).append(row)
+        grouped.setdefault((row.platform, row.account_id, period), []).append(row)
+    accounts_by_id = {a.id: a for a in db.scalars(select(SocialAccount)).all()}
     series = []
-    for (plat, period), batch in sorted(grouped.items(), key=lambda x: (x[0][1], x[0][0])):
+    for (plat, account_id, period), batch in sorted(grouped.items(), key=lambda x: (x[0][2], x[0][0], x[0][1])):
         batch.sort(key=lambda r: (r.reporting_week, r.id))
         first, last = batch[0], batch[-1]
         start_audience, end_audience = first.metrics.get("audience_start"), last.metrics.get("audience_end")
@@ -926,22 +983,35 @@ def social_analytics(start: date, end: date, grain: Literal["week", "month", "qu
         denominator_key = "views" if plat in {"youtube", "tiktok"} else "reach"
         denominator = totals[denominator_key]
         engagement = round(engagements * 100 / denominator, 2) if engagements is not None and denominator else None
-        series.append({"platform": plat, "platform_name": PLATFORMS[plat], "period": period, "weeks_reported": len(batch),
+        account = accounts_by_id.get(account_id)
+        report_handle = batch[-1].account_handle_snapshot or (account.account_handle if account else "")
+        series.append({"platform": plat, "platform_name": PLATFORMS[plat], "account_id": account_id,
+                       "account_name": batch[-1].account_name_snapshot or (account.account_name if account else None),
+                       "account_handle": report_handle,
+                       "series_name": f"{PLATFORMS[plat]} {report_handle}".strip(),
+                       "period": period, "weeks_reported": len(batch),
                        "audience_start": start_audience, "audience_end": end_audience, "net_follower_growth": growth,
                        "audience_growth_percent": growth_pct, **totals, "engagement_interactions": engagements,
                        "engagement_rate_percent": engagement, "engagement_denominator": denominator_key})
-    previous_by_platform = {}
+    previous_by_account = {}
     change_keys = ("net_follower_growth", "audience_growth_percent", "engagement_rate_percent", "reach",
                    "impressions", "views", "posts_published", "videos_published")
-    for point in sorted(series, key=lambda item: (item["platform"], item["period"])):
-        previous = previous_by_platform.get(point["platform"])
+    for point in sorted(series, key=lambda item: (item["platform"], item["account_id"], item["period"])):
+        account_key = (point["platform"], point["account_id"])
+        previous = previous_by_account.get(account_key)
         point["previous_period"] = previous["period"] if previous else None
         point["changes_vs_previous"] = ({key: point[key] - previous[key] if point[key] is not None and previous[key] is not None else None
                                           for key in change_keys} if previous else {key: None for key in change_keys})
-        previous_by_platform[point["platform"]] = point
+        previous_by_account[account_key] = point
     summaries = []
+    configured_accounts = db.scalars(select(SocialAccount).order_by(SocialAccount.platform, SocialAccount.id)).all()
+    summary_accounts = [(platform, label, account) for platform, label in PLATFORMS.items()
+                        for account in configured_accounts if account.platform == platform]
     for plat, label in PLATFORMS.items():
-        batch = sorted([r for r in rows if r.platform == plat], key=lambda r: (r.reporting_week, r.id))
+        if not any(account.platform == plat for account in configured_accounts):
+            summary_accounts.append((plat, label, None))
+    for plat, label, account in summary_accounts:
+        batch = sorted([r for r in rows if r.platform == plat and (account is None or r.account_id == account.id)], key=lambda r: (r.reporting_week, r.id))
         first, last = (batch[0], batch[-1]) if batch else (None, None)
         audience_start = first.metrics.get("audience_start") if first else None
         audience_end = last.metrics.get("audience_end") if last else None
@@ -954,8 +1024,11 @@ def social_analytics(start: date, end: date, grain: Literal["week", "month", "qu
         denominator_name = "views" if plat in {"youtube", "tiktok"} else "reach"
         denominator = totals[denominator_name]
         engagement = round(interactions * 100 / denominator, 2) if interactions is not None and denominator else None
-        summaries.append({"platform": plat, "platform_name": label, "weeks_reported": len(batch),
-                          "audience_start": audience_start, "audience_end": audience_end, "net_follower_growth": net,
+        account_handle = first.account_handle_snapshot if first else account.account_handle if account else None
+        summaries.append({"platform": plat, "platform_name": label, "account_id": account.id if account else None,
+                          "account_handle": account_handle,
+                          "series_name": f"{label} {account_handle}" if account_handle else label,
+                          "weeks_reported": len(batch), "audience_start": audience_start, "audience_end": audience_end, "net_follower_growth": net,
                           "audience_growth_percent": growth_pct, **totals, "engagement_interactions": interactions,
                           "engagement_rate_percent": engagement, "engagement_denominator": denominator_name})
     return {"start": start.isoformat(), "end": end.isoformat(), "grain": grain, "platform_filter": platform,
@@ -965,9 +1038,9 @@ def social_analytics(start: date, end: date, grain: Literal["week", "month", "qu
 
 @router.get("/exports.xlsx")
 def export_weekly_xlsx(start: date | None = None, end: date | None = None, platform: str | None = None,
-                       db: Session = Depends(get_db), actor: User = Depends(current_user)):
+                       account_id: int | None = None, db: Session = Depends(get_db), actor: User = Depends(current_user)):
     _require_officer(db, actor)
-    rows = _weekly_rows(db, start, end, platform)
+    rows = _weekly_rows(db, start, end, platform, account_id)
     output = _xlsx_report(rows, f"Social media weekly reports · {start or 'all'} to {end or 'all'}")
     return StreamingResponse(iter([output]), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": "attachment; filename=social-weekly-reports.xlsx"})
@@ -975,9 +1048,9 @@ def export_weekly_xlsx(start: date | None = None, end: date | None = None, platf
 
 @router.get("/exports.pdf")
 def export_weekly_pdf(start: date | None = None, end: date | None = None, platform: str | None = None,
-                      db: Session = Depends(get_db), actor: User = Depends(current_user)):
+                      account_id: int | None = None, db: Session = Depends(get_db), actor: User = Depends(current_user)):
     _require_officer(db, actor)
-    output = _pdf_report(_weekly_rows(db, start, end, platform), "Social media weekly performance reports")
+    output = _pdf_report(_weekly_rows(db, start, end, platform, account_id), "Social media weekly performance reports")
     return StreamingResponse(iter([output]), media_type="application/pdf",
         headers={"Content-Disposition": "attachment; filename=social-weekly-reports.pdf"})
 

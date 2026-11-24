@@ -1,3 +1,5 @@
+from datetime import date
+
 from conftest import login, mutate, publish_editor_shift
 
 
@@ -62,12 +64,14 @@ def test_weekly_timetable_approval_and_published_version_immutability(system):
 
 def test_employee_submission_independent_verification_and_reports(system):
     client, users = system
+    work_date = date.today()
+    day = work_date.isoformat()
     editor_token = publish_editor_shift(client, users)
     task_response = mutate(client, editor_token, "post", "/api/tasks", json={
         "title": "Prepare daily bulletin", "description": "Prepare a report", "instructions": "Submit notes",
         "employee_ids": [users["employee"]], "department_id": 1, "shift_id": 1,
-        "assignment_date": "2026-11-17", "start_date": "2026-11-17",
-        "deadline": "2026-11-17T18:00:00", "priority": "High"})
+        "assignment_date": day, "start_date": day,
+        "deadline": f"{day}T18:00:00", "priority": "High"})
     assert task_response.status_code == 201, task_response.text
     task_id = task_response.json()[0]["id"]
     client.post("/api/auth/logout", headers={"X-CSRF-Token": editor_token})
@@ -84,15 +88,15 @@ def test_employee_submission_independent_verification_and_reports(system):
     assert verification.status_code == 200 and verification.json()["status"] == "Verified"
     client.post("/api/auth/logout", headers={"X-CSRF-Token": editor_token})
     head_token = login(client, "head")
-    performance = client.get("/api/reports/performance?start=2026-11-17&end=2026-11-17")
+    performance = client.get(f"/api/reports/performance?start={day}&end={day}")
     assert performance.status_code == 200
     row = next(r for r in performance.json()["employees"] if r["employee_id"] == users["employee"])
     assert row["assigned"] == row["submitted"] == row["verified"] == 1
     assert row["submission_rate"] == row["verified_completion_rate"] == 100.0
-    analytics = client.get("/api/reports/analytics?start=2026-11-17&end=2026-11-17")
-    assert analytics.status_code == 200 and analytics.json()["by_day"][0]["label"] == "2026-11-17"
-    assert client.get("/api/reports/tasks.xlsx?start=2026-11-17&end=2026-11-17").status_code == 200
-    assert client.get("/api/reports/tasks.pdf?start=2026-11-17&end=2026-11-17").status_code == 200
+    analytics = client.get(f"/api/reports/analytics?start={day}&end={day}")
+    assert analytics.status_code == 200 and analytics.json()["by_day"][0]["label"] == day
+    assert client.get(f"/api/reports/tasks.xlsx?start={day}&end={day}").status_code == 200
+    assert client.get(f"/api/reports/tasks.pdf?start={day}&end={day}").status_code == 200
     assert client.get("/api/audit").json()
 
 
@@ -160,9 +164,10 @@ def test_login_rate_limit(system):
 
 def test_correction_resubmission_and_head_reopen_audit(system):
     client, users = system
+    day = date.today().isoformat()
     editor_token = publish_editor_shift(client, users)
     task_response = mutate(client, editor_token, "post", "/api/tasks", json={"title": "Update local bulletin", "employee_ids": [users["employee"]],
-        "assignment_date": "2026-11-17", "start_date": "2026-11-17", "deadline": "2026-11-17T23:00:00", "priority": "Normal"})
+        "assignment_date": day, "start_date": day, "deadline": f"{day}T23:00:00", "priority": "Normal"})
     task_id = task_response.json()[0]["id"]
     client.post("/api/auth/logout", headers={"X-CSRF-Token": editor_token})
     employee_token = login(client, "employee")
@@ -210,8 +215,8 @@ def test_editor_people_and_task_assignment_are_scoped_to_published_shift(system)
     assert people.status_code == 200
     assert [x["id"] for x in people.json()] == [users["employee"]]
     denied = mutate(client, editor_token, "post", "/api/tasks", json={"title": "Out of shift task",
-        "employee_ids": [users["employee2"]], "assignment_date": "2026-11-17", "start_date": "2026-11-17",
-        "deadline": "2026-11-17T23:00:00", "priority": "Normal"})
+        "employee_ids": [users["employee2"]], "assignment_date": date.today().isoformat(), "start_date": date.today().isoformat(),
+        "deadline": f"{date.today().isoformat()}T23:00:00", "priority": "Normal"})
     assert denied.status_code == 403
 
 

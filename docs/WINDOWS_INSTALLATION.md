@@ -53,7 +53,7 @@ From an authorized office computer, browse to `http://<reserved-server-ip>:8000`
 7. Editors create one task record per accountable employee. Employees acknowledge, progress, submit written reports and allowed attachments. Editors verify, request corrections or reject with a reason. Head dashboard and reports distinguish submitted from verified work.
 8. In **TBC Digital social media**, the Head registers the verified public account profile for YouTube, Facebook, Instagram, X and TikTok and designates the reporting officer. Do not enter social passwords or API credentials. The officer copies weekly figures from official platform analytics, marks unavailable values N/A, attaches screenshot/report evidence and submits; the Head reviews. Quarterly reports consolidate approved weekly submissions. No official handles or statistics are prefilled. See [Social media reporting](SOCIAL_MEDIA_REPORTING.md).
 
-See [Equipment & shift custody](EQUIPMENT_MANAGEMENT.md) for detailed role permissions, workflow, reports and scenario test. Migration `a1b2c3d4e5f6` adds the manual-first social reporting tables; the normal installer / `python -m app.cli init-db` update path applies it.
+See [Equipment & shift custody](EQUIPMENT_MANAGEMENT.md) for detailed role permissions, workflow, reports and scenario test. Migrations `a1b2c3d4e5f6` and `c7d8e9f0a1b2` add manual social reporting and allow multiple verified profiles per platform; the normal installer / `python -m app.cli init-db` update path applies them.
 
 ## 6. Start, stop and scheduled tasks
 

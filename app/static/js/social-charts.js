@@ -14,7 +14,7 @@
     const height = rows.length * rowHeight + 28, scale = plot / max;
     const elements = rows.map((row, index) => {
       const y = 24 + index * rowHeight;
-      const label = htmlEscape(`${row.period ? `${row.period} · ` : ""}${row.platform_name || row.platform}`.slice(0, 40));
+      const label = htmlEscape(`${row.period ? `${row.period} · ` : ""}${row.series_name || row.platform_name || row.platform}`.slice(0, 40));
       const value = row[key];
       if (value === null || value === undefined) {
         return `<text x="${labelX}" y="${y + 13}" font-size="11">${label}</text><text x="${zeroX + 6}" y="${y + 13}" font-size="11" fill="#66758a">N/A</text>`;

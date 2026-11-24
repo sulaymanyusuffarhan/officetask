@@ -72,9 +72,11 @@ def mutate(client, token, method, url, **kwargs):
 
 def publish_editor_shift(client, users):
     planner_token = login(client, "planner")
-    plan = mutate(client, planner_token, "post", "/api/timetables", json={"week_start": "2026-11-16"}).json()
+    work_date = date.today()
+    week_start = work_date - timedelta(days=work_date.weekday())
+    plan = mutate(client, planner_token, "post", "/api/timetables", json={"week_start": week_start.isoformat()}).json()
     allocated = mutate(client, planner_token, "post", f"/api/timetables/{plan['id']}/assignments", json={
-        "work_date": "2026-11-17", "shift_id": 1, "employee_id": users["employee"],
+        "work_date": work_date.isoformat(), "shift_id": 1, "employee_id": users["employee"],
         "editor_id": users["editor"], "department_id": 1, "responsibility": "Reporting"})
     assert allocated.status_code == 201, allocated.text
     submitted = mutate(client, planner_token, "post", f"/api/timetables/{plan['id']}/submit")

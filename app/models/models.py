@@ -343,10 +343,11 @@ class EquipmentHandoverLine(Base):
 
 
 class SocialAccount(Base):
-    """One verified office profile per supported platform; never stores login credentials."""
+    """A verified office profile; multiple accounts may belong to one platform."""
     __tablename__ = "social_accounts"
+    __table_args__ = (UniqueConstraint("platform", "account_handle", name="uq_social_platform_handle"),)
     id: Mapped[int] = mapped_column(primary_key=True)
-    platform: Mapped[str] = mapped_column(String(20), unique=True, index=True, nullable=False)
+    platform: Mapped[str] = mapped_column(String(20), index=True, nullable=False)
     account_name: Mapped[str | None] = mapped_column(String(160))
     account_handle: Mapped[str | None] = mapped_column(String(160))
     profile_url: Mapped[str | None] = mapped_column(String(500))
