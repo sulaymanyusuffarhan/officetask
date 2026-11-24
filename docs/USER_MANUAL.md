@@ -32,7 +32,7 @@ The interface has Overview, Tasks, Weekly timetable, Shift reports and (for the 
 
 ## Editor
 
-- Assign day-to-day tasks to the authorized staff list and provide instructions/deadlines.
+- Assign day-to-day tasks to employees listed for your published timetable shifts. The picker shows staff assigned to you on published timetables within the next seven days; the task assignment date must match their scheduled date. If the picker is empty, ask the Head to publish the timetable with your editor assignment, then sign out and back in.
 - View your assignment queue, open a submission and choose Verify, Request correction or Reject. Add clear actionable feedback. Never verify your own work; the server enforces the independent-review restriction.
 - Record the shift handover, unfinished responsibilities, challenges and attendance notes at shift end.
 
@@ -59,12 +59,12 @@ Do not perform database edits to “fix” a loan. Use the application workflow 
 
 This is a manual-first reporting workflow. It requires no platform APIs, developer tokens, scraping, or social passwords.
 
-- **Head setup:** open the Social media page, register the verified real profile name/handle for each of YouTube, Facebook, Instagram, X and TikTok, and designate one or more active staff as reporting officers. The account IDs must be verified by your office; the software intentionally does not guess them.
-- **Weekly officer form:** use the separate form for each platform, enter reporting date and Monday week start, then enter the values shown in that platform's analytics. Type a number (enter `0` only if it is really zero) or keep `N/A` for unavailable metrics. Enter best-performing content and recommendations; upload screenshots/PDF/Excel/CSV evidence. A weekly report cannot be submitted without evidence.
-- **Submission and review:** save a draft, check the values/source and evidence, and submit. The Head can approve, reject with reason, or request a correction. Corrected reports are resubmitted; submitted and approved records are not silently editable. One record per platform/week is allowed.
-- **File import:** download the blank Excel/CSV template. Include all required columns and use N/A, not zero, where a metric is not available. Preview reports row errors and duplicates. Correct the file and preview again; only a clean preview can be confirmed. Imported drafts retain the source file as evidence and are marked Imported from file.
+- **Head setup:** open the Social media page, register every verified real profile name/handle for YouTube, Facebook, Instagram, X and TikTok, and designate one or more active staff as reporting officers. Multiple accounts per platform are supported and reported separately. The account IDs must be verified by your office; the software intentionally does not guess them.
+- **Weekly officer form:** use the separate form for each registered account, enter reporting date and Monday week start, then enter the values shown in that account's analytics. Type a number (enter `0` only if it is really zero) or keep `N/A` for unavailable metrics. Enter best-performing content and recommendations; upload screenshots/PDF/Excel/CSV evidence. A weekly report cannot be submitted without evidence.
+- **Submission and review:** save a draft, check the values/source and evidence, and submit. The Head can approve, reject with reason, or request a correction. Corrected reports are resubmitted; submitted and approved records are not silently editable. One record per account/week is allowed; distinct accounts on the same platform may each have a record for that week.
+- **File import:** download the blank Excel/CSV template. Include all required columns, identify the account with its registered handle when a platform has multiple accounts, and use N/A, not zero, where a metric is not available. Preview reports row errors and duplicates. Correct the file and preview again; only a clean preview can be confirmed. Imported drafts retain the source file as evidence and are marked Imported from file.
 - **Quarterly:** generate a quarter from approved weekly records, review the displayed coverage/N/A counts and saved calculations, add management analysis, and submit for Head approval. This is consolidation—do not re-enter weekly figures. Approved quarters are immutable.
-- **Charts and exports:** filter by date and platform; select weekly, monthly or quarterly growth. Charts cover audience growth, platform comparison, engagement, reach, impressions, views, posts and videos. Weekly and quarterly PDF/Excel exports are available. They use saved records, and unavailable totals remain N/A.
+- **Charts and exports:** filter by date and platform; select weekly, monthly or quarterly growth. Charts show account-specific series and comparisons for audience growth, engagement, reach, impressions, views, posts and videos; separate accounts are not blended. Weekly and quarterly PDF/Excel exports are available. They use saved records, and unavailable totals remain N/A.
 
 See [TBC Digital social media reporting](SOCIAL_MEDIA_REPORTING.md) for the formula definitions, import columns and evidence rules. Use only figures copied from authentic analytics evidence; automated tests use isolated sample fixtures that are not official performance data.
 

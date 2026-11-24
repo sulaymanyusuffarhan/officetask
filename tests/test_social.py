@@ -20,10 +20,10 @@ def client_for():
 def configure_social(client, users, officer="editor"):
     token = login(client, "head")
     for platform in PLATFORMS:
-        response = mutate(client, token, "put", f"/api/social/accounts/{platform}", json={
-            "account_name": f"Test Office {platform.title()}", "account_handle": f"@test-office-{platform}",
-            "profile_url": f"https://example.org/{platform}"})
-        assert response.status_code == 200, response.text
+        response = mutate(client, token, "post", "/api/social/accounts", json={
+            "platform": platform, "account_name": f"Test Office {platform.title()}",
+            "account_handle": f"@test-office-{platform}", "profile_url": f"https://example.org/{platform}"})
+        assert response.status_code == 201, response.text
     designated = mutate(client, token, "put", "/api/social/officers", json={"user_ids": [users[officer]]})
     assert designated.status_code == 200
     return token
@@ -35,10 +35,13 @@ def metrics(**changes):
     return values
 
 
-def weekly_body(platform="youtube", reporting_week="2026-01-05", reporting_date="2026-01-09", **changes):
-    return {"platform": platform, "reporting_date": reporting_date, "reporting_week": reporting_week,
+def weekly_body(platform="youtube", reporting_week="2026-01-05", reporting_date="2026-01-09", account_id=None, **changes):
+    body = {"platform": platform, "reporting_date": reporting_date, "reporting_week": reporting_week,
             "metrics": metrics(**changes), "best_content": "Test-only sample content",
             "recommendations": "Test-only review recommendation"}
+    if account_id is not None:
+        body["account_id"] = account_id
+    return body
 
 
 def evidence(client, token, report_id, filename="analytics.png", data=b"\x89PNG\r\n\x1a\nunit-test-fixture"):
@@ -53,6 +56,7 @@ def test_manual_accounts_metrics_evidence_permissions_and_approval(system, monke
     configure_social(client, users)
     page=client.get("/")
     assert page.status_code==200 and 'data-view="social"' in page.text and 'id="view-social"' in page.text
+    assert 'rel="icon"' in page.text and client.get("/static/images/emblem.png").status_code==200
     assert client.get("/static/js/social-charts.js").status_code==200
     listed = client.get("/api/social/accounts")
     assert listed.status_code == 200 and len(listed.json()) == 5
@@ -61,7 +65,8 @@ def test_manual_accounts_metrics_evidence_permissions_and_approval(system, monke
     staff = client_for()
     staff_token = login(staff, "employee")
     assert staff.get("/api/social/weekly").status_code == 403
-    assert mutate(staff, staff_token, "put", "/api/social/accounts/youtube", json={
+    youtube_id = next(a["id"] for a in listed.json() if a["platform"] == "youtube")
+    assert mutate(staff, staff_token, "put", f"/api/social/accounts/{youtube_id}", json={
         "account_name": "Forbidden", "account_handle": "@forbidden"}).status_code == 403
     for username in ("planner", "leader", "admin"):
         denied_client=client_for();login(denied_client,username)
@@ -149,6 +154,63 @@ def test_manual_accounts_metrics_evidence_permissions_and_approval(system, monke
                               json=weekly_body("facebook",audience_start=500,audience_end=511,reach=1000,likes=11,comments=2,shares=1))
     assert corrected_rejected.status_code==200 and corrected_rejected.json()["status"]=="Draft"
     staff.close(); editor.close(); head.close()
+
+
+def test_multiple_accounts_are_reported_and_consolidated_separately(system, monkeypatch, tmp_path):
+    import app.api.social as social_routes
+    monkeypatch.setattr(social_routes.settings, "upload_dir", str(tmp_path))
+    client, users = system
+    head_token = configure_social(client, users)
+    original = next(a for a in client.get("/api/social/accounts").json() if a["platform"] == "youtube")
+    duplicate = mutate(client, head_token, "post", "/api/social/accounts", json={
+        "platform": "youtube", "account_name": "Second YouTube channel", "account_handle": "@test-office-youtube"})
+    assert duplicate.status_code == 409
+    created = mutate(client, head_token, "post", "/api/social/accounts", json={
+        "platform": "youtube", "account_name": "Second YouTube channel", "account_handle": "@test-office-youtube-2"})
+    assert created.status_code == 201, created.text
+    second_id = created.json()["id"]
+    accounts = client.get("/api/social/accounts").json()
+    assert len(accounts) == 6 and {a["id"] for a in accounts if a["platform"] == "youtube"} == {original["id"], second_id}
+
+    editor = client_for(); editor_token = login(editor, "editor")
+    import_row = {"platform": "youtube", "account_handle": "@test-office-youtube-2",
+                  "reporting_date": "2026-02-06", "reporting_week": "2026-02-02",
+                  **{key: "N/A" for key in METRICS}, "best_content": "", "recommendations": ""}
+    import_fields = ["platform", "account_handle", "reporting_date", "reporting_week", *METRICS,
+                     "best_content", "recommendations"]
+    csv_buffer = io.StringIO(); writer = csv.DictWriter(csv_buffer, fieldnames=import_fields)
+    writer.writeheader(); writer.writerow(import_row); import_data = csv_buffer.getvalue().encode()
+    preview = mutate(editor, editor_token, "post", "/api/social/imports/preview",
+                     files={"file": ("multi-account.csv", import_data, "text/csv")})
+    assert preview.status_code == 200 and preview.json()["ready_count"] == 1
+    assert preview.json()["rows"][0]["account_id"] == second_id
+    import_row["account_handle"] = ""
+    csv_buffer = io.StringIO(); writer = csv.DictWriter(csv_buffer, fieldnames=import_fields)
+    writer.writeheader(); writer.writerow(import_row)
+    ambiguous_import = mutate(editor, editor_token, "post", "/api/social/imports/preview",
+                              files={"file": ("ambiguous.csv", csv_buffer.getvalue().encode(), "text/csv")})
+    assert ambiguous_import.status_code == 200 and ambiguous_import.json()["error_count"] == 1
+    ambiguous = mutate(editor, editor_token, "post", "/api/social/weekly", json=weekly_body())
+    assert ambiguous.status_code == 422 and "specific" in ambiguous.text
+    first = mutate(editor, editor_token, "post", "/api/social/weekly", json=weekly_body(
+        account_id=original["id"], audience_start=100, audience_end=110, new_followers=10,
+        lost_followers=0, reach=200, views=300, likes=10, comments=2, shares=1))
+    second = mutate(editor, editor_token, "post", "/api/social/weekly", json=weekly_body(
+        account_id=second_id, audience_start=1000, audience_end=1025, new_followers=25,
+        lost_followers=0, reach=500, views=700, likes=20, comments=4, shares=2))
+    assert first.status_code == 201 and second.status_code == 201
+    assert evidence(editor, editor_token, first.json()["id"]).status_code == 201
+    assert evidence(editor, editor_token, second.json()["id"]).status_code == 201
+    for report in (first.json(), second.json()):
+        assert mutate(editor, editor_token, "post", f"/api/social/weekly/{report['id']}/submit").status_code == 200
+        assert mutate(client, head_token, "post", f"/api/social/weekly/{report['id']}/review",
+                      json={"decision": "approve", "comment": "Verified per account evidence"}).status_code == 200
+    quarter = mutate(editor, editor_token, "post", "/api/social/quarters/generate", json={"year": 2026, "quarter": 1})
+    assert quarter.status_code == 201, quarter.text
+    youtube_rows = [p for p in quarter.json()["snapshot"]["platforms"] if p["platform"] == "youtube"]
+    assert {p["account_id"] for p in youtube_rows} == {original["id"], second_id}
+    assert {p["audience_start"] for p in youtube_rows} == {100, 1000}
+    editor.close(); client.close()
 
 
 def test_import_preview_templates_commit_source_and_duplicate_validation(system, monkeypatch, tmp_path):
